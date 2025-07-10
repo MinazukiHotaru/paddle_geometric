@@ -1,12 +1,11 @@
 from typing import Optional
 
 import paddle
-import paddle.nn.functional as F
 from paddle import Tensor
 
 from paddle_geometric.nn.aggr.fused import FusedAggregation
 
-
+# @finshed
 class BatchNorm(paddle.nn.Layer):
     r"""Applies batch normalization over a batch of features as described in
     the `"Batch Normalization: Accelerating Deep Network Training by
@@ -54,18 +53,26 @@ class BatchNorm(paddle.nn.Layer):
             raise ValueError("'allow_single_element' requires "
                              "'track_running_stats' to be set to `True`")
 
-        self.module = paddle.nn.BatchNorm1D(in_channels, eps, momentum, affine,
-                                           track_running_stats)
+        self.module = paddle.nn.BatchNorm1D(
+            num_features=in_channels,
+            epsilon=eps,
+            weight_attr=affine,
+            bias_attr=affine,
+            momentum=1 - momentum,
+            use_global_stats=False if track_running_stats else True
+        )
         self.in_channels = in_channels
         self.allow_single_element = allow_single_element
 
     def reset_running_stats(self):
         r"""Resets all running statistics of the module."""
-        self.module.reset_running_stats()
+        # self.module.reset_running_stats()
+        pass
 
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
-        self.module.reset_parameters()
+        # self.module.reset_parameters()
+        pass
 
     def forward(self, x: Tensor) -> Tensor:
         r"""Forward pass.
@@ -75,21 +82,21 @@ class BatchNorm(paddle.nn.Layer):
         """
         if self.allow_single_element and x.shape[0] <= 1:
             return paddle.nn.functional.batch_norm(
-                x,
-                self.module._mean,
-                self.module._variance,
-                self.module._weight,
-                self.module._bias,
-                False,  # bn_training
-                0.0,  # momentum
-                self.module._epsilon,
+                x=x,
+                running_mean=self.module._mean,
+                running_var=self.module._variance,
+                weight=self.module.weight,
+                bias=self.module.bias,
+                training=False,
+                epsilon=self.module._epsilon,
+                momentum=1.0,
             )
         return self.module(x)
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.module.extra_repr()})'
 
-
+# @finshed
 class HeteroBatchNorm(paddle.nn.Layer):
     r"""Applies batch normalization over a batch of heterogeneous features as
     described in the `"Batch Normalization: Accelerating Deep Network Training
@@ -133,28 +140,31 @@ class HeteroBatchNorm(paddle.nn.Layer):
         self.track_running_stats = track_running_stats
 
         if self.affine:
-            self.weight = paddle.create_parameter(
-                shape=[num_types, in_channels], dtype='float32')
-
-            self.bias = paddle.create_parameter(
-                shape=[num_types, in_channels], dtype='float32')
+            self.weight = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=[num_types, in_channels])
+            )
+            self.bias = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=[num_types, in_channels])
+            )
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+            self.add_parameter(name="weight", parameter=None)
+            self.add_parameter(name="bias", parameter=None)
 
         if self.track_running_stats:
-            self.register_buffer('running_mean',
-                                 paddle.empty([num_types, in_channels]))
-            self.register_buffer('running_var',
-                                 paddle.empty([num_types, in_channels]))
-            self.register_buffer('num_batches_tracked', paddle.to_tensor(0))
+            self.register_buffer(
+                name="running_mean", tensor=paddle.empty(shape=[num_types, in_channels])
+            )
+            self.register_buffer(
+                name="running_var", tensor=paddle.empty(shape=[num_types, in_channels])
+            )
+            self.register_buffer(
+                name="num_batches_tracked", tensor=paddle.to_tensor(data=0)
+            )
         else:
-            self.register_buffer('running_mean', None)
-            self.register_buffer('running_var', None)
-            self.register_buffer('num_batches_tracked', None)
-
-        self.mean_var = FusedAggregation(['mean', 'var'])
-
+            self.register_buffer(name="running_mean", tensor=None)
+            self.register_buffer(name="running_var", tensor=None)
+            self.register_buffer(name="num_batches_tracked", tensor=None)
+        self.mean_var = FusedAggregation(["mean", "var"])
         self.reset_parameters()
 
     def reset_running_stats(self):
@@ -168,8 +178,10 @@ class HeteroBatchNorm(paddle.nn.Layer):
         r"""Resets all learnable parameters of the module."""
         self.reset_running_stats()
         if self.affine:
-            paddle.nn.initializer.ones(self.weight)
-            paddle.nn.initializer.zeros(self.bias)
+            init_Constant = paddle.nn.initializer.Constant(value=1.0)
+            init_Constant(self.weight)
+            init_Constant = paddle.nn.initializer.Constant(value=0.0)
+            init_Constant(self.bias)
 
     def forward(self, x: Tensor, type_vec: Tensor) -> Tensor:
         r"""Forward pass.
@@ -183,29 +195,23 @@ class HeteroBatchNorm(paddle.nn.Layer):
         else:
             with paddle.no_grad():
                 mean, var = self.mean_var(x, type_vec, dim_size=self.num_types)
-
         if self.training and self.track_running_stats:
             if self.momentum is None:
-                self.num_batches_tracked.add_(1)
+                self.num_batches_tracked.add_(y=paddle.to_tensor(1))
                 exp_avg_factor = 1.0 / float(self.num_batches_tracked)
             else:
                 exp_avg_factor = self.momentum
-
-            with paddle.no_grad():  # Update running mean and variance:
-                type_index = paddle.unique(type_vec)
-
+            with paddle.no_grad():
+                type_index = paddle.unique(x=type_vec)
                 self.running_mean[type_index] = (
-                    (1.0 - exp_avg_factor) * self.running_mean[type_index] +
-                    exp_avg_factor * mean[type_index])
+                    1.0 - exp_avg_factor
+                ) * self.running_mean[type_index] + exp_avg_factor * mean[type_index]
                 self.running_var[type_index] = (
-                    (1.0 - exp_avg_factor) * self.running_var[type_index] +
-                    exp_avg_factor * var[type_index])
-
-        out = (x - mean[type_vec]) / var.clamp(self.eps).sqrt()[type_vec]
-
+                    1.0 - exp_avg_factor
+                ) * self.running_var[type_index] + exp_avg_factor * var[type_index]
+        out = (x - mean[type_vec]) / var.clip(min=self.eps).sqrt()[type_vec]
         if self.affine:
             out = out * self.weight[type_vec] + self.bias[type_vec]
-
         return out
 
     def __repr__(self) -> str:

@@ -6,7 +6,7 @@ from paddle_geometric.nn.inits import ones, zeros
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import scatter
 
-
+# @finshed
 class GraphNorm(paddle.nn.Layer):
     r"""Applies graph normalization over individual graphs as described in the
     `"GraphNorm: A Principled Approach to Accelerating Graph Neural Network
@@ -32,11 +32,16 @@ class GraphNorm(paddle.nn.Layer):
         self.in_channels = in_channels
         self.eps = eps
 
-        # Create parameters using paddle.create_parameter
-        self.weight = paddle.create_parameter(shape=[in_channels], dtype='float32')
-        self.bias = paddle.create_parameter(shape=[in_channels], dtype='float32')
-        self.mean_scale = paddle.create_parameter(shape=[in_channels], dtype='float32')
-
+        # Create parameters
+        self.weight = paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=in_channels)
+        )
+        self.bias = paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=in_channels)
+        )
+        self.mean_scale = paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=in_channels)
+        )
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -58,7 +63,7 @@ class GraphNorm(paddle.nn.Layer):
                 Automatically calculated if not given. (default: :obj:`None`)
         """
         if batch is None:
-            batch = x.new_zeros([x.shape[0]], dtype=paddle.int64)
+            batch = paddle.zeros(shape=x.shape[0], dtype="int64")
             batch_size = 1
 
         if batch_size is None:

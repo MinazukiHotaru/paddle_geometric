@@ -8,7 +8,7 @@ from paddle.nn import Layer
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import degree, scatter
 
-
+# @finshed
 class LayerNorm(Layer):
     r"""Applies layer normalization over each individual example in a batch
     of features as described in the `"Layer Normalization"
@@ -50,17 +50,21 @@ class LayerNorm(Layer):
         self.mode = mode
 
         if affine:
-            self.weight = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(1.0))
-            self.bias = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(0.0))
+            self.weight = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=in_channels)
+            )
+            self.bias = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=in_channels)
+            )
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+            self.add_parameter(name="weight", parameter=None)
+            self.add_parameter(name="bias", parameter=None)
 
         self.reset_parameters()
 
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
-        paddle.nn.initializer.XavierUniform()(self.weight)
+        paddle.nn.initializer.Constant(1.0)(self.weight)
         paddle.nn.initializer.Constant(0.0)(self.bias)
 
     def forward(self, x: Tensor, batch: OptTensor = None,
@@ -84,8 +88,8 @@ class LayerNorm(Layer):
                 if batch_size is None:
                     batch_size = int(batch.max()) + 1
 
-                norm = degree(batch, batch_size, dtype=x.dtype).clamp_(min=1)
-                norm = norm.mul_(x.shape[-1]).reshape(-1, 1)
+                norm = degree(batch, batch_size, dtype=x.dtype).clip_(min=1)
+                norm = norm.multiply_(y=paddle.to_tensor(x.shape[-1])).view([-1, 1])
 
                 mean = scatter(x, batch, dim=0, dim_size=batch_size,
                                reduce='sum').sum(axis=-1, keepdim=True) / norm
@@ -113,7 +117,7 @@ class LayerNorm(Layer):
         return (f'{self.__class__.__name__}({self.in_channels}, '
                 f'affine={self.affine}, mode={self.mode})')
 
-
+# @finshed
 class HeteroLayerNorm(Layer):
     r"""Applies layer normalization over each individual example in a batch
     of heterogeneous features as described in the `"Layer Normalization"
@@ -149,21 +153,25 @@ class HeteroLayerNorm(Layer):
         self.num_types = num_types
         self.eps = eps
         self.affine = affine
-
         if affine:
-            self.weight = paddle.create_parameter(shape=[num_types, in_channels], dtype='float32')
-            self.bias = paddle.create_parameter(shape=[num_types, in_channels], dtype='float32')
+            self.weight = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=[num_types, in_channels])
+            )
+            self.bias = paddle.base.framework.EagerParamBase.from_tensor(
+                tensor=paddle.empty(shape=[num_types, in_channels])
+            )
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
-
+            self.add_parameter(name="weight", parameter=None)
+            self.add_parameter(name="bias", parameter=None)
         self.reset_parameters()
 
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
         if self.affine:
-            paddle.nn.initializer.Constant(1.0)(self.weight)
-            paddle.nn.initializer.Constant(0.0)(self.bias)
+            init_Constant = paddle.nn.initializer.Constant(value=1.0)
+            init_Constant(self.weight)
+            init_Constant = paddle.nn.initializer.Constant(value=0.0)
+            init_Constant(self.bias)
 
     def forward(
         self,
@@ -192,12 +200,13 @@ class HeteroLayerNorm(Layer):
 
         if self.affine:
             if type_ptr is not None:
-                h = paddle.empty_like(out)
+                h = paddle.empty_like(x=out)
                 for i, (s, e) in enumerate(zip(type_ptr[:-1], type_ptr[1:])):
                     h[s:e] = out[s:e] * self.weight[i] + self.bias[i]
                 out = h
             else:
                 out = out * self.weight[type_vec] + self.bias[type_vec]
+        return out
 
         return out
 

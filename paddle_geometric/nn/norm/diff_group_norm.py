@@ -1,9 +1,9 @@
 import paddle
 import paddle.nn.functional as F
 from paddle import Tensor
-from paddle.nn import Linear, BatchNorm1D
+from paddle.nn import Linear
 
-
+# @finshed
 class DiffGroupNorm(paddle.nn.Layer):
     r"""The differentiable group normalization layer from the `"Towards Deeper
     Graph Neural Networks with Differentiable Group Normalization"
@@ -58,14 +58,21 @@ class DiffGroupNorm(paddle.nn.Layer):
         self.lamda = lamda
 
         self.lin = Linear(in_channels, groups, bias_attr=False)
-        self.norm = BatchNorm1D(groups * in_channels, eps=eps, momentum=momentum)
-
+        self.norm = paddle.nn.BatchNorm1D(
+            num_features=groups * in_channels,
+            epsilon=eps,
+            weight_attr=affine,
+            bias_attr=affine,
+            momentum=1 - momentum,
+            use_global_stats=False if track_running_stats else True,
+        )
         self.reset_parameters()
 
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
-        self.lin.reset_parameters()
-        self.norm.reset_parameters()
+        pass
+        # self.lin.reset_parameters()
+        # self.norm.reset_parameters()
 
     def forward(self, x: Tensor) -> Tensor:
         r"""Forward pass.
@@ -75,10 +82,9 @@ class DiffGroupNorm(paddle.nn.Layer):
         """
         F, G = self.in_channels, self.groups
 
-        s = self.lin(x).softmax(axis=-1)  # [N, G]
-        out = s.unsqueeze(-1) * x.unsqueeze(-2)  # [N, G, F]
-        out = self.norm(out.reshape([-1, G * F])).reshape([-1, G, F]).sum(axis=-2)  # [N, F]
-
+        s = paddle.nn.functional.softmax(self.lin(x), axis=-1)
+        out = s.unsqueeze(axis=-1) * x.unsqueeze(axis=-2)
+        out = self.norm(out.view([-1, G * F])).view([-1, G, F]).sum(axis=-2)
         return x + self.lamda * out
 
     @staticmethod
@@ -100,21 +106,22 @@ class DiffGroupNorm(paddle.nn.Layer):
         :obj:`y`.
         """
         num_classes = int(y.max()) + 1
-
-        numerator = 0.
+        numerator = 0.0
         for i in range(num_classes):
             mask = y == i
-            dist = paddle.cdist(x[mask].unsqueeze(0), x[~mask].unsqueeze(0))
-            numerator += (1 / dist.numel()) * float(dist.sum())
-        numerator *= 1 / (num_classes - 1)**2
-
-        denominator = 0.
+            dist = paddle.cdist(
+                x=x[mask].unsqueeze(axis=0), y=x[~mask].unsqueeze(axis=0)
+            )
+            numerator += 1 / dist.size * float(dist.sum())
+        numerator *= 1 / (num_classes - 1) ** 2
+        denominator = 0.0
         for i in range(num_classes):
             mask = y == i
-            dist = paddle.cdist(x[mask].unsqueeze(0), x[mask].unsqueeze(0))
-            denominator += (1 / dist.numel()) * float(dist.sum())
+            dist = paddle.cdist(
+                x=x[mask].unsqueeze(axis=0), y=x[mask].unsqueeze(axis=0)
+            )
+            denominator += 1 / dist.size * float(dist.sum())
         denominator *= 1 / num_classes
-
         return numerator / (denominator + eps)
 
     def __repr__(self) -> str:

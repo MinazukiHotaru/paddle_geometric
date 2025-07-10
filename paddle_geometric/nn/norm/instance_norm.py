@@ -8,8 +8,8 @@ from paddle.nn import Layer
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import degree, scatter
 
-
-class InstanceNorm(Layer):
+# @finshed
+class InstanceNorm(paddle.nn._InstanceNormBase):
     r"""Applies instance normalization over each individual example in a batch
     of node features as described in the `"Instance Normalization: The Missing
     Ingredient for Fast Stylization" <https://arxiv.org/abs/1607.08022>`_
@@ -46,25 +46,18 @@ class InstanceNorm(Layer):
         affine: bool = False,
         track_running_stats: bool = False,
     ):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.eps = eps
-        self.momentum = momentum
-        self.affine = affine
-        self.track_running_stats = track_running_stats
-
-        self.weight = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(1.0))
-        self.bias = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(0.0))
-        self.running_mean = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(0.0), is_bias=True)
-        self.running_var = paddle.create_parameter(shape=[in_channels], dtype='float32', default_initializer=paddle.nn.initializer.Constant(1.0), is_bias=True)
+        assert track_running_stats is False, "Not supported yet."
+        super().__init__(
+            in_channels, eps, 1-momentum, weight_attr=affine, bias_attr=affine
+        )
 
     def reset_parameters(self):
         """Resets all learnable parameters of the module."""
-        paddle.nn.initializer.XavierUniform()(self.weight)
-        paddle.nn.initializer.Constant(0.0)(self.bias)
-        paddle.nn.initializer.Constant(0.0)(self.running_mean)
-        paddle.nn.initializer.Constant(1.0)(self.running_var)
+        pass
+        # paddle.nn.initializer.Constant(1.0)(self.weight)
+        # paddle.nn.initializer.Constant(0.0)(self.bias)
+        # paddle.nn.initializer.Constant(0.0)(self.running_mean)
+        # paddle.nn.initializer.Constant(1.0)(self.running_var)
 
     def forward(self, x: Tensor, batch: OptTensor = None,
                 batch_size: Optional[int] = None) -> Tensor:
@@ -79,11 +72,17 @@ class InstanceNorm(Layer):
                 Automatically calculated if not given. (default: :obj:`None`)
         """
         if batch is None:
-            out = F.instance_norm(
-                x.t().unsqueeze(0), self.running_mean, self.running_var,
-                self.weight, self.bias, self.training
-                or not self.track_running_stats, self.momentum, self.eps)
-            return out.squeeze(0).t()
+            out = paddle.nn.functional.instance_norm(
+                x=x.t().unsqueeze(axis=0),
+                running_mean=self.running_mean,
+                running_var=self.running_var,
+                weight=self.scale,
+                bias=self.bias,
+                # use_input_stats=self.training or not self.track_running_stats,
+                eps=self.eps,
+                momentum=self.momentum,
+            )
+            return out.squeeze(axis=0).t()
 
         if batch_size is None:
             batch_size = int(batch.max()) + 1
@@ -91,9 +90,9 @@ class InstanceNorm(Layer):
         mean = var = unbiased_var = x  # Dummies.
 
         if self.training or not self.track_running_stats:
-            norm = degree(batch, batch_size, dtype=x.dtype).clamp_(min=1)
-            norm = norm.unsqueeze(-1)
-            unbiased_norm = (norm - 1).clamp_(min=1)
+            norm = degree(batch, batch_size, dtype=x.dtype).clip_(min=1)
+            norm = norm.view([-1, 1])
+            unbiased_norm = (norm - 1).clip_(min=1)
 
             mean = scatter(x, batch, dim=0, dim_size=batch_size, reduce='sum') / norm
 
@@ -113,18 +112,18 @@ class InstanceNorm(Layer):
                 ) * self.running_var + momentum * unbiased_var.mean(0)
         else:
             if self.running_mean is not None:
-                mean = self.running_mean.unsqueeze(0).expand(batch_size, -1)
+                mean = self.running_mean.view([-1, 1]).expand([batch_size, -1])
             if self.running_var is not None:
-                var = self.running_var.unsqueeze(0).expand(batch_size, -1)
+                var = self.running_var.view([-1, 1]).expand([batch_size, -1])
 
             x = x - mean.index_select(0, batch)
 
         out = x / (var + self.eps).sqrt().index_select(0, batch)
 
-        if self.weight is not None and self.bias is not None:
-            out = out * self.weight.unsqueeze(0) + self.bias.unsqueeze(0)
+        if self.scale is not None and self.bias is not None:
+            out = out * self.scale.view([-1, 1]) + self.bias.view([-1, 1])
 
         return out
 
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({self.in_channels})'
+        return f'{self.__class__.__name__}({self.num_features})'

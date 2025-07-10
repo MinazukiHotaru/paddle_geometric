@@ -7,7 +7,7 @@ from paddle.nn import Layer
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import scatter
 
-
+# @finshed
 class PairNorm(Layer):
     r"""Applies pair normalization over node features as described in the
     `"PairNorm: Tackling Oversmoothing in GNNs"
@@ -52,25 +52,32 @@ class PairNorm(Layer):
                 Automatically calculated if not given. (default: :obj:`None`)
         """
         scale = self.scale
-
         if batch is None:
             x = x - x.mean(axis=0, keepdim=True)
-
             if not self.scale_individually:
-                return scale * x / paddle.sqrt(self.eps + x.pow(2).sum(-1).mean())
+                return scale * x / (self.eps + x.pow(y=2).sum(axis=-1).mean()).sqrt()
             else:
-                return scale * x / (self.eps + x.norm(2, -1, keepdim=True))
-
+                return scale * x / (self.eps + x.norm(p=2, axis=-1, keepdim=True))
         else:
-            mean = scatter(x, batch, dim=0, dim_size=batch_size, reduce='mean')
-            x = x - mean.index_select(0, batch)
-
+            mean = scatter(x, batch, dim=0, dim_size=batch_size, reduce="mean")
+            x = x - mean.index_select(axis=0, index=batch)
             if not self.scale_individually:
-                return scale * x / paddle.sqrt(self.eps + scatter(
-                    x.pow(2).sum(-1, keepdim=True), batch, dim=0,
-                    dim_size=batch_size, reduce='mean').index_select(0, batch))
+                return (
+                    scale
+                    * x
+                    / paddle.sqrt(
+                        x=self.eps
+                        + scatter(
+                            x.pow(y=2).sum(axis=-1, keepdim=True),
+                            batch,
+                            dim=0,
+                            dim_size=batch_size,
+                            reduce="mean",
+                        ).index_select(0, batch)
+                    )
+                )
             else:
-                return scale * x / (self.eps + x.norm(2, -1, keepdim=True))
+                return scale * x / (self.eps + x.norm(p=2, axis=-1, keepdim=True))
 
     def __repr__(self):
         return f'{self.__class__.__name__}()'

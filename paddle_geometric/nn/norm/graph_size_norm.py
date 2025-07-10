@@ -6,7 +6,7 @@ from paddle import Tensor
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import degree
 
-
+# @finshed
 class GraphSizeNorm(paddle.nn.Layer):
     r"""Applies Graph Size Normalization over each individual graph in a batch
     of node features as described in the
@@ -32,11 +32,11 @@ class GraphSizeNorm(paddle.nn.Layer):
                 Automatically calculated if not given. (default: :obj:`None`)
         """
         if batch is None:
-            batch = paddle.zeros([x.shape[0]], dtype=paddle.int64, device=x.device)
+            batch = paddle.zeros(shape=x.shape[0], dtype="int64")
             batch_size = 1
 
         inv_sqrt_deg = degree(batch, batch_size, dtype=x.dtype).pow(-0.5)
-        return x * inv_sqrt_deg.index_select(0, batch).unsqueeze(-1)
+        return x * inv_sqrt_deg.index_select(0, batch).view([-1, 1])
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}()'

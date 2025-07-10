@@ -5,7 +5,7 @@ from paddle import Tensor
 
 from paddle_geometric.utils import scatter
 
-
+# @finshed
 class MeanSubtractionNorm(paddle.nn.Layer):
     r"""Applies layer normalization by subtracting the mean from the inputs
     as described in the  `"Revisiting 'Over-smoothing' in Deep GCNs"

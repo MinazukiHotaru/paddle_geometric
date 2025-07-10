@@ -2,7 +2,7 @@ import paddle
 import paddle.nn.functional as F
 from paddle import Tensor
 
-
+# @finshed
 class MessageNorm(paddle.nn.Layer):
     r"""Applies message normalization over the aggregated messages as described
     in the `"DeeperGCNs: All You Need to Train Deeper GCNs"
@@ -21,10 +21,8 @@ class MessageNorm(paddle.nn.Layer):
     """
     def __init__(self, learn_scale: bool = False):
         super().__init__()
-        self.scale = paddle.create_parameter(
-            shape=[1],  # Shape of the parameter
-            dtype='float32',  # Data type
-            default_initializer=paddle.nn.initializer.Constant(value=0.0)  # Optional: Default initializer
+        self.scale = paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=[1]), trainable=learn_scale
         )
         self.reset_parameters()
 
@@ -42,7 +40,7 @@ class MessageNorm(paddle.nn.Layer):
                 (default: :obj:`2.0`)
         """
         msg = F.normalize(msg, p=p, axis=-1)
-        x_norm = paddle.norm(x, p=p, axis=-1, keepdim=True)
+        x_norm = x.norm(p=p, axis=-1, keepdim=True)
         return msg * x_norm * self.scale
 
     def __repr__(self) -> str:

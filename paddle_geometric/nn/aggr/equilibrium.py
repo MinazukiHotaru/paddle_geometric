@@ -138,7 +138,7 @@ class EquilibriumAggregation(Aggregation):
 
         self.assert_index_present(index)
 
-        dim_size = int(index._max()) + 1 if dim_size is None else dim_size
+        dim_size = int(index.max()) + 1 if dim_size is None else dim_size
         with paddle.enable_grad():
             y = self.optimizer(
                 x,

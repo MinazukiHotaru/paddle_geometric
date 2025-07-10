@@ -202,7 +202,7 @@ class FusedAggregation(Aggregation):
             if ptr is not None:
                 dim_size = ptr.size - 1
             else:
-                dim_size = int(index._max()) + 1 if index.size > 0 else 0
+                dim_size = int(index.max()) + 1 if index.size > 0 else 0
 
         count: Optional[Tensor] = None
         if self.need_degree:

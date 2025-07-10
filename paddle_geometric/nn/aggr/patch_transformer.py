@@ -104,7 +104,7 @@ class PatchTransformerAggregation(Aggregation):
             else:
                 count = scatter(paddle.ones_like(index), index, dim=0,
                                 dim_size=dim_size, reduce='sum')
-            max_num_elements = int(count._max()) + 1
+            max_num_elements = int(count.max()) + 1
 
         # Set `max_num_elements` to a multiple of `patch_size`:
         max_num_elements = (math.floor(max_num_elements / self.patch_size) *

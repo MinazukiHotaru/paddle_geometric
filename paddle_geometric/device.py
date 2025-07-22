@@ -15,12 +15,26 @@ def is_xpu_available() -> bool:
     """
     Returns a bool indicating if XPU (Intel Extension for PaddlePaddle) is currently available.
     """
-    try:
-        from paddle_xpu import is_compiled_with_xpu
-        return is_compiled_with_xpu()
-    except ImportError:
-        return False
+    return False
 
+
+def device2str(type=None, index=None, *, device=None):
+    type = device if device else type
+    if isinstance(type, int):
+        type = f'gpu:{type}'
+    elif isinstance(type, str):
+        if 'cuda' in type:
+            type = type.replace('cuda', 'gpu')
+        if 'cpu' in type:
+            type = 'cpu'
+        elif index is not None:
+            type = f'{type}:{index}'
+    elif isinstance(type, paddle.CPUPlace) or (type is None):
+        type = 'cpu'
+    elif isinstance(type, paddle.CUDAPlace):
+        type = f'gpu:{type.get_device_id()}'
+
+    return type
 
 def device(device: Any) -> paddle.device:
     """
@@ -29,9 +43,11 @@ def device(device: Any) -> paddle.device:
     If 'auto' is specified, returns the optimal device depending on available hardware.
     """
     if device != 'auto':
-        return paddle.device.set_device(device)
-    if paddle.device.is_compiled_with_cuda():
-        return paddle.device.set_device('gpu')
+        return device2str(device)
+    if paddle.device.cuda.device_count() >= 1:
+        return device2str("cuda")
+    if is_mps_available():
+        return device2str("mps")
     if is_xpu_available():
-        return paddle.device.set_device('xpu')
-    return paddle.device.set_device('cpu')
+        return device2str("xpu")
+    return device2str("cpu")

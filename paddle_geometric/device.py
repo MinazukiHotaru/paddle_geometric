@@ -51,3 +51,15 @@ def device(device: Any) -> paddle.device:
     if is_xpu_available():
         return device2str("xpu")
     return device2str("cpu")
+
+
+def place2devicestr(place):
+    if  place.is_cpu_place():
+        device = 'cpu'
+    elif place.is_gpu_place():
+        device_id = place.gpu_device_id()
+        device = 'gpu:' + str(device_id)
+    else:
+        raise ValueError(f"The device specification {place} is invalid")
+
+    return device

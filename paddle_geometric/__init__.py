@@ -10,7 +10,7 @@ from .edge_index import EdgeIndex
 from .pytree import pytree
 from .seed import seed_everything
 from .home import get_home_dir, set_home_dir
-from .device import is_mps_available, is_xpu_available, device
+from .device import is_mps_available, is_xpu_available, device, place2devicestr
 from .isinstance import is_paddle_instance
 from .debug import is_debug_enabled, debug, set_debug
 
@@ -45,6 +45,7 @@ __all__ = [
     'is_mps_available',
     'is_xpu_available',
     'device',
+    'place2devicestr',
     'is_paddle_instance',
     'is_debug_enabled',
     'debug',

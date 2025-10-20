@@ -1,10 +1,10 @@
 import functools
+import warnings
 from enum import Enum
 from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
     List,
     Literal,
     NamedTuple,
@@ -13,27 +13,20 @@ from typing import (
     Tuple,
     Type,
     Union,
-    get_args,
     overload,
 )
 
 import paddle
-from .pytree import pytree
 from paddle import Tensor
-from paddle.autograd import PyLayer
+
 import paddle_geometric.typing
-from paddle_geometric import Index, is_compiling
+from paddle_geometric import Index
 from paddle_geometric.index import index2ptr, ptr2index
 from paddle_geometric.typing import INDEX_DTYPES, SparseTensor
 
-
 from .dispatcher import BaseTensorSubclass, register_for
 
-# aten = paddle.ops.aten
-
 HANDLED_FUNCTIONS: Dict[Callable, Callable] = {}
-
-
 
 ReduceType = Literal['sum', 'mean', 'amin', 'amax', 'add', 'min', 'max']
 PYG_REDUCE: Dict[ReduceType, ReduceType] = {
@@ -58,16 +51,6 @@ class CatMetadata(NamedTuple):
     sparse_size: List[Tuple[Optional[int], Optional[int]]]
     sort_order: List[Optional[SortOrder]]
     is_undirected: List[bool]
-
-
-# def implements(paddle_function: Callable) -> Callable:
-#     r"""Registers a Paddle function override."""
-#     @functools.wraps(paddle_function)
-#     def decorator(my_function: Callable) -> Callable:
-#         HANDLED_FUNCTIONS[paddle_function] = my_function
-#         return my_function
-#
-#     return decorator
 
 
 def set_tuple_item(
@@ -280,7 +263,8 @@ class EdgeIndex(BaseTensorSubclass):
 
         indptr: Optional[Tensor] = None
 
-        if isinstance(data, EdgeIndex):  # If passed `EdgeIndex`, inherit metadata:
+        if isinstance(data,
+                      EdgeIndex):  # If passed `EdgeIndex`, inherit metadata:
             indptr = data._indptr
             sparse_size = sparse_size or data.sparse_size()
             sort_order = sort_order or data.sort_order
@@ -289,9 +273,9 @@ class EdgeIndex(BaseTensorSubclass):
         # Convert `paddle.sparse` tensors to `EdgeIndex` representation:
         if data.is_sparse_coo():
             sort_order = SortOrder.ROW
-            sparse_size = sparse_size or (data.shape[0], data.shape[1])  # .shape in Paddle
+            sparse_size = sparse_size or (data.shape[0], data.shape[1]
+                                          )  # .shape in Paddle
             data = data.indices()
-
 
         if data.is_sparse_csr():
             indptr = data.crows()  # CSR row pointers
@@ -305,7 +289,7 @@ class EdgeIndex(BaseTensorSubclass):
             if sparse_size[0] is not None and sparse_size[0] != data.shape[0]:
                 indptr = None
             data = paddle.stack([row, col])  # Equivalent to torch.stack
-        
+
         # Paddle doesn't support the CSC format.
         assert_valid_dtype(data)
         assert_two_dimensional(data)
@@ -321,16 +305,17 @@ class EdgeIndex(BaseTensorSubclass):
             elif sparse_size[0] is None and sparse_size[1] is not None:
                 sparse_size = (sparse_size[1], sparse_size[1])
 
-
         self.data = data.data
 
         # Attach metadata:
         self._sparse_size = sparse_size
-        self._sort_order = None if sort_order is None else SortOrder(sort_order)
+        self._sort_order = None if sort_order is None else SortOrder(
+            sort_order)
         self._is_undirected = is_undirected
         self._indptr = indptr
 
-        if isinstance(data, EdgeIndex):  # If passed `EdgeIndex`, inherit metadata:
+        if isinstance(data,
+                      EdgeIndex):  # If passed `EdgeIndex`, inherit metadata:
             self.data = data._data
             self._T_perm = data._T_perm
             self._T_index = data._T_index
@@ -584,12 +569,11 @@ class EdgeIndex(BaseTensorSubclass):
 
     @assert_sorted
     def _sort_by_transpose(self) -> Tuple[Tuple[Tensor, Tensor], Tensor]:
-       
 
         dim = 1 if self.is_sorted_by_row else 0
 
         if self._T_perm is None:
-            max_index = self.get_sparse_size(dim)
+            self.get_sparse_size(dim)
             index, perm = self._data[dim].sort(), self._data[dim].argsort()
             self._T_index = set_tuple_item(self._T_index, dim, index)
             self._T_perm = perm.to(self.dtype)
@@ -643,7 +627,8 @@ class EdgeIndex(BaseTensorSubclass):
 
         return (colptr, row), perm
 
-    def _get_value(self, dtype: Optional[paddle.dtype] = None) -> paddle.Tensor:
+    def _get_value(self,
+                   dtype: Optional[paddle.dtype] = None) -> paddle.Tensor:
         if self._value is not None:
             if (dtype or paddle.get_default_dtype()) == self._value.dtype:
                 return self._value
@@ -651,7 +636,8 @@ class EdgeIndex(BaseTensorSubclass):
         # Expanded tensors are not yet supported in all Paddle code paths :(
         # value = paddle.ones([1], dtype=dtype, place=self.place)
         # value = value.expand(self.size(1))
-        self._value = paddle.ones([self.shape[1]], dtype=dtype, device=self.place)
+        self._value = paddle.ones([self.shape[1]], dtype=dtype,
+                                  device=self.place)
         return self._value
 
     def fill_cache_(self, no_transpose: bool = False) -> 'EdgeIndex':
@@ -679,24 +665,13 @@ class EdgeIndex(BaseTensorSubclass):
 
     def share_memory_(self) -> 'EdgeIndex':
         """"""  # noqa: D419
-        self._data.share_memory_()
-        if self._indptr is not None:
-            self._indptr.share_memory_()
-        if self._T_perm is not None:
-            self._T_perm.share_memory_()
-        if self._T_index[0] is not None:
-            self._T_index[0].share_memory_()
-        if self._T_index[1] is not None:
-            self._T_index[1].share_memory_()
-        if self._T_indptr is not None:
-            self._T_indptr.share_memory_()
-        if self._value is not None:
-            self._value.share_memory_()
+        warnings.warn("share_memory_ is not supported for Index, ignore it")
         return self
 
     def is_shared(self) -> bool:
         """"""  # noqa: D419
-        return self._data.is_shared()
+        warnings.warn("is_shared is not supported for Index, ignore it")
+        return False
 
     def as_tensor(self) -> Tensor:
         r"""Zero-copies the :class:`EdgeIndex` representation back to a
@@ -718,7 +693,6 @@ class EdgeIndex(BaseTensorSubclass):
                 guarantees that the order of equivalent elements is preserved.
                 (default: :obj:`False`)
         """
-
         sort_order = SortOrder(sort_order)
 
         if self._sort_order == sort_order:  # Nothing to do.
@@ -730,12 +704,14 @@ class EdgeIndex(BaseTensorSubclass):
 
         # Otherwise, perform sorting:
         elif sort_order == SortOrder.ROW:
-            row, perm = self._data[0].sort(stable=stable), self._data[0].argsort(stable=stable)
+            row, perm = self._data[0].sort(
+                stable=stable), self._data[0].argsort(stable=stable)
             edge_index = paddle.stack([row, self._data[1][perm]], axis=0)
 
         else:
-            col, perm = self._data[1].sort(stable=stable), self._data[1].argsort(stable=stable)
-            
+            col, perm = self._data[1].sort(
+                stable=stable), self._data[1].argsort(stable=stable)
+
             edge_index = paddle.stack([self._data[0][perm], col], axis=0)
 
         out = self.__class__(edge_index)
@@ -783,7 +759,7 @@ class EdgeIndex(BaseTensorSubclass):
 
         size = self.get_sparse_size()
         if value is not None and value.dim() > 1:
-            size = list(size)+value.shape[1:]  # type: ignore
+            size = list(size) + value.shape[1:]  # type: ignore
 
         out = paddle.full(size, fill_value, dtype=dtype, device=self.device)
         out[self._data[0], self._data[1]] = value if value is not None else 1
@@ -854,25 +830,24 @@ class EdgeIndex(BaseTensorSubclass):
         raise NotImplementedError("Paddle don't support this method yet")
 
     def to_sparse(
-            self,
-            *, 
-            layout: str = 'coo',
-            value: Optional[paddle.Tensor] = None,
+        self,
+        *,
+        layout: str = 'coo',
+        value: Optional[paddle.Tensor] = None,
     ) -> paddle.Tensor:
         r"""Converts :class:`EdgeIndex` into a
         :paddle:`null` :class:`paddle.sparse` tensor.
 
         Args:
+            layout (str, optional): The layout of the sparse tensor.
             value (paddle.Tensor, optional): The values for non-zero elements.
                 If not specified, non-zero elements will be assigned a value of
                 :obj:`1.0`. (default: :obj:`None`)
         """
-        # if value is None:
-        #     value = paddle.ones(self._data.shape[1], dtype=self._data.dtype, device=self.device)
-
         # Create sparse COO tensor
         if layout is None or layout == 'coo':
-            return self.to_sparse_coo(value)  # You can keep other formats like CSR, CSC if necessary
+            return self.to_sparse_coo(
+                value)  # You can keep other formats like CSR, CSC if necessary
         elif layout == 'csr':
             return self.to_sparse_csr(value)
         elif layout == 'csc':
@@ -901,7 +876,6 @@ class EdgeIndex(BaseTensorSubclass):
             is_sorted=self.is_sorted_by_row,
             trust_data=True,
         )
-
 
     def clone(self):
 
@@ -943,7 +917,7 @@ class EdgeIndex(BaseTensorSubclass):
 
     def to(self, *args, **kwargs):
 
-        data = self._data.to( *args, **kwargs)
+        data = self._data.to(*args, **kwargs)
 
         if data.dtype not in INDEX_DTYPES:
             return data
@@ -979,14 +953,13 @@ class EdgeIndex(BaseTensorSubclass):
 
         return out
 
-
-    def cuda(self,):
+    def cuda(self, ):
         if self.place.is_gpu_place():
             return self
         index = self.to(device='gpu')
         return index
-    
-    def cpu(self,):
+
+    def cpu(self, ):
         if self.place.is_cpu_place():
             return self
         index = self.to(device='cpu')
@@ -994,13 +967,14 @@ class EdgeIndex(BaseTensorSubclass):
 
     def astype(self, dtype):
         index = self.to(dtype=dtype)
-        return index 
+        return index
+
     @property
-    def is_cpu(self,):
+    def is_cpu(self, ):
         return self.place.is_cpu_place()
 
     @property
-    def is_cuda(self,):
+    def is_cuda(self, ):
         return self.place.is_gpu_place()
 
     # TODO Investigate how to avoid overlapping return types here.
@@ -1146,10 +1120,10 @@ class EdgeIndex(BaseTensorSubclass):
                 mask = self._data[0] >= start
                 mask &= self._data[0] < (start + length)
                 offset = paddle.to_tensor([[start], [0]], place=self.device)
-                edge_index = paddle.subtract(self[:, mask], offset)  # type: ignore
+                edge_index = paddle.subtract(self[:, mask],
+                                             offset)  # type: ignore
                 edge_index._sparse_size = (length, edge_index._sparse_size[1])
                 return edge_index
-
 
         else:
             assert dim == 1
@@ -1188,7 +1162,8 @@ class EdgeIndex(BaseTensorSubclass):
                 mask = self._data[1] >= start
                 mask &= self._data[1] < (start + length)
                 offset = paddle.to_tensor([[0], [start]], place=self.device)
-                edge_index = paddle.subtract(self[:, mask], offset)  # type: ignore
+                edge_index = paddle.subtract(self[:, mask],
+                                             offset)  # type: ignore
                 edge_index._sparse_size = (edge_index._sparse_size[0], length)
                 return edge_index
 
@@ -1210,93 +1185,23 @@ class EdgeIndex(BaseTensorSubclass):
             '_sort_order': self._sort_order,
             '_is_undirected': self._is_undirected,
         }
+
     @classmethod
     def from_dict(cls, data_dict) -> 'Index':
         r"""Creates a new :class:`Index` instance from a dictionary."""
-        out = cls(data_dict['data'],
-                  sparse_size=data_dict['_sparse_size'],
-                  sort_order=data_dict['_sort_order'],
-                  is_undirected=data_dict['_is_undirected'],
+        out = cls(
+            data_dict['data'],
+            sparse_size=data_dict['_sparse_size'],
+            sort_order=data_dict['_sort_order'],
+            is_undirected=data_dict['_is_undirected'],
         )
         out._indptr = data_dict.get('_indptr', None)
         return out
 
-    # PyTorch/Python builtins #################################################
-
-    def __tensor_flatten__(self) -> Tuple[List[str], Tuple[Any, ...]]:
-        attrs = ['_data']
-        if self._indptr is not None:
-            attrs.append('_indptr')
-        if self._T_perm is not None:
-            attrs.append('_T_perm')
-        # TODO We cannot save `_T_index` for now since it is stored as tuple.
-        if self._T_indptr is not None:
-            attrs.append('_T_indptr')
-
-        ctx = (
-            self._sparse_size,
-            self._sort_order,
-            self._is_undirected,
-            self._cat_metadata,
-        )
-
-        return attrs, ctx
-
-    @staticmethod
-    def __tensor_unflatten__(
-        inner_tensors: Dict[str, Any],
-        ctx: Tuple[Any, ...],
-        outer_size: Tuple[int, ...],
-        outer_stride: Tuple[int, ...],
-    ) -> 'EdgeIndex':
-        edge_index = EdgeIndex(
-            inner_tensors['_data'],
-            sparse_size=ctx[0],
-            sort_order=ctx[1],
-            is_undirected=ctx[2],
-        )
-
-        edge_index._indptr = inner_tensors.get('_indptr', None)
-        edge_index._T_perm = inner_tensors.get('_T_perm', None)
-        edge_index._T_indptr = inner_tensors.get('_T_indptr', None)
-        edge_index._cat_metadata = ctx[3]
-
-        return edge_index
-
-
-    @classmethod
-    def __torch_dispatch__(
-        cls: Type,
-        func: Callable[..., Any],
-        types: Iterable[Type[Any]],
-        args: Iterable[Tuple[Any, ...]] = (),
-        kwargs: Optional[Dict[Any, Any]] = None,
-    ) -> Any:
-        # `EdgeIndex` should be treated as a regular PyTorch tensor for all
-        # standard PyTorch functionalities. However,
-        # * some of its metadata can be transferred to new functions, e.g.,
-        #   `torch.cat(dim=1)` can inherit the sparse matrix size, or
-        #   `torch.narrow(dim=1)` can inherit cached pointers.
-        # * not all operations lead to valid `EdgeIndex` tensors again, e.g.,
-        #   `torch.sum()` does not yield a `EdgeIndex` as its output, or
-        #   `torch.cat(dim=0) violates the [2, *] shape assumption.
-
-        # To account for this, we hold a number of `HANDLED_FUNCTIONS` that
-        # implement specific functions for valid `EdgeIndex` routines.
-        if func in HANDLED_FUNCTIONS:
-            return HANDLED_FUNCTIONS[func](*args, **(kwargs or {}))
-
-        # For all other PyTorch functions, we treat them as vanilla tensors.
-        args = pytree.tree_map_only(EdgeIndex, lambda x: x._data, args)
-        if kwargs is not None:
-            kwargs = pytree.tree_map_only(EdgeIndex, lambda x: x._data, kwargs)
-        return func(*args, **(kwargs or {}))
-
-
     @property
-    def device(self,):
+    def device(self, ):
         place = self.place
-        if  place.is_cpu_place():
+        if place.is_cpu_place():
             device = 'cpu'
         elif place.is_gpu_place():
             device_id = place.gpu_device_id()
@@ -1331,6 +1236,7 @@ class EdgeIndex(BaseTensorSubclass):
 
     def __str__(self) -> str:
         return self.__repr__()
+
     # Helpers #################################################################
 
     def _shallow_copy(self) -> 'EdgeIndex':
@@ -1358,8 +1264,6 @@ class EdgeIndex(BaseTensorSubclass):
         self._cat_metadata = None
         return self
 
-
-
     def __getitem__(self, index):
         # Step 1: Call the underlying Tensor's __getitem__
         out = self._data.__getitem__(index)
@@ -1368,7 +1272,8 @@ class EdgeIndex(BaseTensorSubclass):
             out = out.contiguous()
             new = EdgeIndex(out)
             # Step 3: Preserve some metadata
-            # By default, do not inherit cache, because these caches are invalid after indexing
+            # By default, do not inherit cache,
+            # because these caches are invalid after indexing
             new._sparse_size = self._sparse_size
             new._indptr = None
             new._T_perm = None
@@ -1378,7 +1283,7 @@ class EdgeIndex(BaseTensorSubclass):
             new._cat_metadata = None
 
             # Only pure slices (like 1::2 or slice(None)) preserve sorting
-            idx_tuple = index if isinstance(index, tuple) else (index,)
+            idx_tuple = index if isinstance(index, tuple) else (index, )
 
             # Check if it is an identity slice
             is_identity = False
@@ -1386,43 +1291,50 @@ class EdgeIndex(BaseTensorSubclass):
                 is_identity = True
             elif isinstance(index, tuple):
                 is_identity = all(
-                    isinstance(i, slice) and i.start is None and i.stop is None and i.step is None
-                    for i in index
-                )
+                    isinstance(i, slice) and i.start is None and i.stop is None
+                    and i.step is None for i in index)
             # Check if it is basic indexing or a boolean mask
             is_basic_or_bool_mask = all(
-                isinstance(i, (slice, type(Ellipsis))) or i is None or
-                (isinstance(i, Tensor) and i.dtype == paddle.bool)
-                for i in idx_tuple
-            )
+                isinstance(i, (slice, type(Ellipsis))) or i is None or (
+                    isinstance(i, Tensor) and i.dtype == paddle.bool)
+                for i in idx_tuple)
 
             if is_identity:
                 # Fully inherit metadata
                 new._sort_order = self._sort_order
                 new._is_undirected = self._is_undirected
             else:
-                # Partial indexing → sort_order may be preserved, is_undirected=False
-                new._sort_order = self._sort_order if is_basic_or_bool_mask else None
+                # Partial indexing → sort_order may
+                # be preserved, is_undirected=False
+                if is_basic_or_bool_mask:
+                    new._sort_order = self._sort_order
+                else:
+                    new._sort_order = None
                 new._is_undirected = False
             return new
-        
+
         # Index 情况：一维结果
         if isinstance(out, Tensor) and out.ndim == 1:
             out = out.contiguous()
             # 判断是否完整选取行/列
             row_index = index[0] if isinstance(index, tuple) else index
-            col_index = index[1] if isinstance(index, tuple) and len(index) > 1 else slice(None)
+            col_index = index[1] if isinstance(
+                index, tuple) and len(index) > 1 else slice(None)
 
-            row_index = row_index + self._data.shape[0] if isinstance(row_index, int) and row_index < 0 else row_index
-            col_index = col_index + self._data.shape[1] if isinstance(col_index, int) and col_index < 0 else col_index
+            row_index = row_index + self._data.shape[0] if isinstance(
+                row_index, int) and row_index < 0 else row_index
+            col_index = col_index + self._data.shape[1] if isinstance(
+                col_index, int) and col_index < 0 else col_index
 
             def is_single_index(s):
                 if isinstance(s, int):
                     return True
                 elif isinstance(s, slice):
-                    # 如果 slice.start == slice.stop 或 step =1 并且 stop-start=1 时可以视作单行
+                    # 如果 slice.start == slice.stop 或
+                    # step =1 并且 stop-start=1 时可以视作单行
                     # 但 stop=None 或 start=None 时无法计算长度 → 当作非单行
-                    return s.start is not None and s.stop is not None and (s.stop - s.start) == 1
+                    return s.start is not None and s.stop is not None and (
+                        s.stop - s.start) == 1
                 return False
 
             is_single_row = is_single_index(row_index)
@@ -1431,19 +1343,25 @@ class EdgeIndex(BaseTensorSubclass):
             # 仅当单行/单列选择时返回 Index
             if not (is_single_row or is_single_col):
                 return out  # 部分选择返回 Tensor
-            
+
             # 返回 Index
-            dim_size = self._sparse_size[0] if row_index == 0 else self._sparse_size[1]
+            dim_size = self._sparse_size[
+                0] if row_index == 0 else self._sparse_size[1]
             # 构造 is_sorted
-            if isinstance(row_index, int) and row_index == 0 and self._sort_order == SortOrder.ROW:
+            if isinstance(
+                    row_index, int
+            ) and row_index == 0 and self._sort_order == SortOrder.ROW:
                 is_sorted = True
-            elif isinstance(row_index, int) and row_index == 1 and self._sort_order == SortOrder.COL:
+            elif isinstance(
+                    row_index, int
+            ) and row_index == 1 and self._sort_order == SortOrder.COL:
                 is_sorted = True
             else:
                 is_sorted = False
 
             def is_full_col(col_index):
-                """Return True if all columns are selected (for _indptr preservation)."""
+                # Return True if all columns are
+                # selected (for _indptr preservation).
                 n_cols = self._data.shape[1]
                 # Case 1: 全选
                 if col_index is None:
@@ -1454,8 +1372,15 @@ class EdgeIndex(BaseTensorSubclass):
 
                 # Case 3: 切片情况
                 if isinstance(col_index, slice):
-                    start = col_index.start if col_index.start is not None else 0
-                    stop = col_index.stop if col_index.stop is not None else n_cols
+                    if col_index.start is not None:
+                        start = col_index.start
+                    else:
+                        start = 0
+                    if col_index.stop is not None:
+                        stop = col_index.stop
+                    else:
+                        stop = n_cols
+
                     step = col_index.step if col_index.step is not None else 1
 
                     # 负数修正
@@ -1473,20 +1398,17 @@ class EdgeIndex(BaseTensorSubclass):
                     # - 元素个数与列数一致
                     # - 值集合 == 全列集合
                     if len(col_index) == n_cols:
-                        col_values = (
-                            col_index.tolist()
-                            if isinstance(col_index, paddle.Tensor)
-                            else col_index
-                        )
+                        col_values = (col_index.tolist() if isinstance(
+                            col_index, paddle.Tensor) else col_index)
                         col_values = [int(x) % n_cols for x in col_values]
                         return sorted(set(col_values)) == list(range(n_cols))
                     return False
 
                 return False
 
-            # 仅特定 row_index + sort_order 才保留
-            if ((row_index == 0 and self._sort_order == SortOrder.ROW) or \
-            (row_index == 1 and self._sort_order == SortOrder.COL)) and is_full_col(col_index):
+            if ((row_index == 0 and self._sort_order == SortOrder.ROW) or
+                (row_index == 1 and self._sort_order == SortOrder.COL)) and \
+                    is_full_col(col_index):
                 indptr = self._indptr
             else:
                 indptr = None
@@ -1501,31 +1423,36 @@ class EdgeIndex(BaseTensorSubclass):
 
     def flip(self, axis, **kwargs):
         return paddle.flip(x=self, axis=axis, **kwargs)
+
     def index_select(self, index, axis=0, name=None, **kwargs):
         return paddle.index_select(self, index, axis=axis, name=name, **kwargs)
-    
+
     def narrow(self, dim, start, length):
         return paddle.narrow(self, dim=dim, start=start, length=length)
 
     def __iter__(self):
-        row =  self[0]
+        row = self[0]
         col = self[1]
         return iter((row, col))
+
     def __add__(self, other):
         return paddle.add(self, other)
 
     def __radd__(self, other):
         return paddle.add(other, self)
 
-    def __sub__(self, other): 
+    def __sub__(self, other):
         return paddle.subtract(self, other)
-    def __rsub__(self, other): 
+
+    def __rsub__(self, other):
         return paddle.subtract(other, self)
+
     def __matmul__(self, other):
         return paddle.matmul(self, other)
 
     def __rmatmul__(self, other):
         return paddle.matmul(other, self)
+
 
 @register_for("concat")(EdgeIndex)
 def concat_edgeindex(x, axis=0, name=None):
@@ -1539,7 +1466,7 @@ def concat_edgeindex(x, axis=0, name=None):
     if any([not isinstance(tensor, EdgeIndex) for tensor in x]):
         return concat_paddle
 
-    out =  EdgeIndex(concat_paddle)
+    out = EdgeIndex(concat_paddle)
 
     nnz_list = [t.shape[1] for t in x]
     sparse_size_list = [t.sparse_size() for t in x]  # type: ignore
@@ -1590,7 +1517,9 @@ def flip_edgeindex(
     out._is_undirected = x.is_undirected
 
     if isinstance(axis, int):
-        axis = [axis, ]
+        axis = [
+            axis,
+        ]
 
     # Flip metadata and cache:
     if 0 in axis or -2 in axis:
@@ -1609,15 +1538,10 @@ def flip_edgeindex(
 
     return out
 
+
 @register_for('index_select')(EdgeIndex)
-def index_select_edgeindex(
-    x: EdgeIndex,
-    index: Tensor,
-    axis: int = 0,
-    name=None,
-    *,
-    out=None
-) -> Union[EdgeIndex, Tensor]:
+def index_select_edgeindex(x: EdgeIndex, index: Tensor, axis: int = 0,
+                           name=None, *, out=None) -> Union[EdgeIndex, Tensor]:
 
     result = paddle.index_select(x.data, index, axis, name, out=out)
     if (axis == 1 or axis == -1) and out is None:
@@ -1628,20 +1552,16 @@ def index_select_edgeindex(
 
 
 @register_for('narrow')(EdgeIndex)
-def narrow_edgeindex(
-    input: EdgeIndex,
-    dim: int,
-    start,
-    length
-) -> Union[EdgeIndex, Tensor]:
-    
+def narrow_edgeindex(input: EdgeIndex, dim: int, start,
+                     length) -> Union[EdgeIndex, Tensor]:
+
     end = start + length
     if start <= 0 and end > input.data.shape[dim]:
         return input._shallow_copy()
-    
+
     out = paddle.narrow(input.data, dim, start, length)
     if dim == 1 or dim == -1:
-        
+
         out = EdgeIndex(out)
         out._sparse_size = input.sparse_size()
         # NOTE We could potentially maintain `rowptr`/`colptr` attributes here,
@@ -1654,9 +1574,8 @@ def narrow_edgeindex(
 @register_for('unbind')(EdgeIndex)
 def unbind_edgeindex(
     input: EdgeIndex,
-    axis = 0,
+    axis=0,
 ) -> Union[EdgeIndex, Tensor]:
-    
 
     if axis == 0 or axis == -2:
         row = input[0]
@@ -1682,7 +1601,7 @@ def add_edgeindex(x, y, **kwargs):
         return out_data
     if out_data.dim() != 2 or out_data.shape[0] != 2:
         return out_data
-    
+
     out = EdgeIndex(out_data)
 
     if isinstance(y, Tensor) and y.numel() <= 1:
@@ -1719,14 +1638,14 @@ def subtract_edgeindex(x, y, **kwargs):
 
     alpha = kwargs.get('alpha', 1)
     y_data = y_data * alpha
-    
+
     if isinstance(x_data, Tensor) and isinstance(y_data, Tensor):
         if x_data.dtype == paddle.int32 and y_data.dtype == paddle.int64:
             x_data = x_data.astype(paddle.int64)
-        
+
         if x_data.dtype == paddle.int64 and y_data.dtype == paddle.int32:
             y_data = y_data.astype(paddle.int64)
-    
+
     out = x_data - y_data
 
     if out.dtype not in INDEX_DTYPES:
@@ -1761,9 +1680,12 @@ def subtract_edgeindex(x, y, **kwargs):
 @register_for("matmul")(EdgeIndex)
 def matmul_edgeindex(x, y, **kwargs):
     return matmul(x, y)
+
+
 @register_for("mm")(EdgeIndex)
 def mm_edgeindex(x, y, **kwargs):
     return matmul(x, y)
+
 
 def matmul(
     input: EdgeIndex,
@@ -1811,8 +1733,8 @@ def matmul(
     if out.is_sparse_csr():
         rowptr = out.crows().to(input.dtype)
         col = out.cols().to(input.dtype)
-        edge_index = csr_to_coo_paddle(
-            rowptr, col, out_int32=rowptr.dtype != paddle.int64)
+        edge_index = csr_to_coo_paddle(rowptr, col, out_int32=rowptr.dtype
+                                       != paddle.int64)
     elif out.is_sparse_coo():  # pragma: no cover
         out = out.coalesce()
         edge_index = out.indices()
@@ -1826,6 +1748,7 @@ def matmul(
     edge_index._indptr = rowptr
 
     return edge_index, out.values()
+
 
 def csr_to_coo_paddle(crow_indices, col_indices, out_int32=False):
     num_rows = crow_indices.shape[0] - 1
@@ -1855,7 +1778,8 @@ class SortReturnType(NamedTuple):
 #     reduce: ReduceType = 'sum',
 #     transpose: bool = False,
 # ) -> paddle.Tensor:
-#     # Paddle does not have a direct equivalent to `torch-sparse`, so we assume
+#     # Paddle does not have a direct equivalent
+#     # to `torch-sparse`, so we assume
 #     # custom implementation for sparse matrix multiplication.
 #     assert paddle_geometric.typing.WITH_PADDLE_SPARSE
 #     reduce = PYG_REDUCE[reduce] if reduce in PYG_REDUCE else reduce
@@ -1884,7 +1808,8 @@ class SortReturnType(NamedTuple):
 
 #     if reduce == 'mean':
 #         rowcount = paddle.diff(rowptr) if other.requires_grad else None
-#         return paddle.sparse.spmv(  # Sparse matrix-vector multiplication with mean
+# Sparse matrix-vector multiplication with mean
+#         return paddle.sparse.spmv(
 #             row, rowptr, col, value, rowcount, colptr, perm, other
 #         )
 
@@ -1896,10 +1821,15 @@ class SortReturnType(NamedTuple):
 
 #     raise NotImplementedError
 
-
 # class _PaddleSPMM(PyLayer):
 #     @staticmethod
-#     def forward(ctx: Any, input: EdgeIndex, other: Tensor, value: Optional[Tensor] = None, reduce: ReduceType = 'sum', transpose: bool = False) -> Tensor:
+#     def forward(
+#       ctx: Any,
+#       input: EdgeIndex,
+#       other: Tensor,
+#       value: Optional[Tensor] = None,
+#       reduce: ReduceType = 'sum',
+#       transpose: bool = False) -> Tensor:
 #         reduce = PYG_REDUCE[reduce] if reduce in PYG_REDUCE else reduce
 
 #         value = value.detach() if value is not None else value
@@ -1923,7 +1853,7 @@ class SortReturnType(NamedTuple):
 #             return adj @ other
 
 #     @staticmethod
-#     def backward(ctx: Any, *grad_outputs: Any) -> Tuple[None, Optional[Tensor], None, None, None]:
+#     def backward(ctx: Any, *grad_outputs: Any):
 #         grad_out, = grad_outputs
 
 #         other_grad: Optional[Tensor] = None
@@ -1967,10 +1897,11 @@ class SortReturnType(NamedTuple):
 #             other_grad = adj @ grad_out
 
 #         if ctx.needs_input_grad[2]:
-#             raise NotImplementedError("Gradient computation for 'value' not yet supported")
+#             raise NotImplementedError(
+#                   "Gradient computation for 'value' not yet supported
+#           ")
 
 #         return None, other_grad, None, None, None
-
 
 # def _scatter_spmm(
 #     input: EdgeIndex,
@@ -2034,7 +1965,6 @@ class SortReturnType(NamedTuple):
 
 #     raise NotImplementedError
 
-
 # def matmul(
 #     input: EdgeIndex,
 #     other: Union[Tensor, EdgeIndex],
@@ -2051,8 +1981,9 @@ class SortReturnType(NamedTuple):
 #         return _spmm(input, other, input_value, reduce, transpose)
 
 #     if reduce not in ['sum', 'add']:
-#         raise NotImplementedError(f"`reduce='{reduce}'` not yet supported for "
-#                                   f"sparse-sparse matrix multiplication")
+#         raise NotImplementedError(
+#               f"`reduce='{reduce}'` not yet supported for "
+#               f"sparse-sparse matrix multiplication")
 
 #     transpose &= not input.is_undirected or input_value is not None
 
@@ -2095,8 +2026,8 @@ class SortReturnType(NamedTuple):
 # ) -> Union[paddle.Tensor, Tuple[EdgeIndex, paddle.Tensor]]:
 #     return matmul(input, other)
 
-
-# # Implements the sparse matrix multiplication with addition (addmm) for EdgeIndex tensors
+# # Implements the sparse matrix multiplication with
+# addition (addmm) for EdgeIndex tensors
 # def _addmm(
 #     input: paddle.Tensor,
 #     mat1: EdgeIndex,
@@ -2109,8 +2040,8 @@ class SortReturnType(NamedTuple):
 #     assert isinstance(out, paddle.Tensor)
 #     return alpha * out if alpha != 1.0 else out
 
-
-# # Implements the sparse matrix multiplication with reduction (mm_reduce) for EdgeIndex tensors
+# # Implements the sparse matrix multiplication with
+# reduction (mm_reduce) for EdgeIndex tensors
 # def _mm_reduce(
 #     mat1: EdgeIndex,
 #     mat2: paddle.Tensor,
@@ -2119,4 +2050,3 @@ class SortReturnType(NamedTuple):
 #     out = matmul(mat1, mat2, reduce=reduce)
 #     assert isinstance(out, paddle.Tensor)
 #     return out, out  # We return a dummy tensor for `argout` for now.
-

@@ -21,7 +21,12 @@ import paddle
 from paddle import Tensor
 from typing_extensions import Self
 
-from paddle_geometric.data import EdgeAttr, FeatureStore, GraphStore, TensorAttr
+from paddle_geometric.data import (
+    EdgeAttr,
+    FeatureStore,
+    GraphStore,
+    TensorAttr,
+)
 from paddle_geometric.data.feature_store import _FieldStatus
 from paddle_geometric.data.graph_store import EdgeLayout
 from paddle_geometric.data.storage import (
@@ -32,6 +37,7 @@ from paddle_geometric.data.storage import (
 )
 from paddle_geometric.deprecation import deprecated
 from paddle_geometric.index import Index
+from paddle_geometric.paddle_utils import device2int  # noqa
 from paddle_geometric.typing import (
     EdgeTensorType,
     EdgeType,
@@ -42,6 +48,7 @@ from paddle_geometric.typing import (
     TensorFrame,
 )
 from paddle_geometric.utils import is_sparse, select, subgraph
+
 
 class BaseData:
     def __getattr__(self, key: str) -> Any:
@@ -71,38 +78,38 @@ class BaseData:
     def __repr__(self) -> str:
         raise NotImplementedError
 
-    def stores_as(self, data: "BaseData"):
+    def stores_as(self, data: Self):
         raise NotImplementedError
 
     @property
-    def stores(self) -> List[Any]:
+    def stores(self) -> List[BaseStorage]:
         raise NotImplementedError
 
     @property
-    def node_stores(self) -> List[Any]:
+    def node_stores(self) -> List[NodeStorage]:
         raise NotImplementedError
 
     @property
-    def edge_stores(self) -> List[Any]:
+    def edge_stores(self) -> List[EdgeStorage]:
         raise NotImplementedError
 
     def to_dict(self) -> Dict[str, Any]:
-        r"""Returns a dictionary of stored key/value pairs."""
+        """Returns a dictionary of stored key/value pairs."""
         raise NotImplementedError
 
     def to_namedtuple(self) -> NamedTuple:
-        r"""Returns a `NamedTuple` of stored key/value pairs."""
+        """Returns a :obj:`NamedTuple` of stored key/value pairs."""
         raise NotImplementedError
 
-    def update(self, data: "BaseData") -> "BaseData":
-        r"""Updates the data object with the elements from another data object.
+    def update(self, data: Self) -> Self:
+        """Updates the data object with the elements from another data object.
         Added elements will override existing ones (in case of duplicates).
         """
         raise NotImplementedError
 
-    def concat(self, data: "BaseData") -> "BaseData":
-        r"""Concatenates `self` with another `data` object.
-        All values need to have matching shapes at non-concatenation dimensions.
+    def concat(self, data: Self) -> Self:
+        """Concatenates :obj:`self` with another :obj:`data` object.
+        All values needs to have matching shapes at non-concat dimensions.
         """
         out = copy.copy(self)
         for store, other_store in zip(out.stores, data.stores):
@@ -110,9 +117,9 @@ class BaseData:
         return out
 
     def __cat_dim__(self, key: str, value: Any, *args, **kwargs) -> Any:
-        r"""Returns the dimension for which the value `value` of the
-        attribute `key` will get concatenated when creating mini-batches
-        using `paddle.io.DataLoader`.
+        """Returns the dimension for which the value :obj:`value` of the
+        attribute :obj:`key` will get concatenated when creating mini-batches
+        using :class:`torch_geometric.loader.DataLoader`.
 
         .. note::
 
@@ -123,9 +130,9 @@ class BaseData:
         raise NotImplementedError
 
     def __inc__(self, key: str, value: Any, *args, **kwargs) -> Any:
-        r"""Returns the incremental count to cumulatively increase the value
-        `value` of the attribute `key` when creating mini-batches
-        using `paddle.io.DataLoader`.
+        """Returns the incremental count to cumulatively increase the value
+        :obj:`value` of the attribute :obj:`key` when creating mini-batches
+        using :class:`torch_geometric.loader.DataLoader`.
 
         .. note::
 
@@ -138,21 +145,21 @@ class BaseData:
     def debug(self):
         raise NotImplementedError
 
-    ###########################################################################
-
     def keys(self) -> List[str]:
-        r"""Returns a list of all graph attribute names."""
+        """Returns a list of all graph attribute names."""
         out = []
         for store in self.stores:
             out += list(store.keys())
         return list(set(out))
 
     def __len__(self) -> int:
-        r"""Returns the number of graph attributes."""
+        """Returns the number of graph attributes."""
         return len(self.keys())
 
     def __contains__(self, key: str) -> bool:
-        r"""Returns `True` if the attribute `key` is present in the data."""
+        """Returns :obj:`True` if the attribute :obj:`key` is present in the
+        data.
+        """
         return key in self.keys()
 
     def __getstate__(self) -> Dict[str, Any]:
@@ -164,19 +171,19 @@ class BaseData:
 
     @property
     def num_nodes(self) -> Optional[int]:
-        r"""Returns the number of nodes in the graph.
+        """Returns the number of nodes in the graph.
 
         .. note::
             The number of nodes in the data object is automatically inferred
-            in case node-level attributes are present, e.g., `data.x`.
+            in case node-level attributes are present, *e.g.*, :obj:`data.x`.
             In some cases, however, a graph may only be given without any
             node-level attributes.
-            PyG then *guesses* the number of nodes according to
-            `edge_index.max().item() + 1`.
-            However, in case there exist isolated nodes, this number does not
-            have to be correct, which can result in unexpected behavior.
-            Thus, we recommend setting the number of nodes in your data object
-            explicitly via `data.num_nodes = ...`.
+            :pyg:`PyG` then *guesses* the number of nodes according to
+            :obj:`edge_index.max().item() + 1`.
+            However, in case there exists isolated nodes, this number does not
+            have to be correct which can result in unexpected behavior.
+            Thus, we recommend to set the number of nodes in your data object
+            explicitly via :obj:`data.num_nodes = ...`.
             You will be given a warning that requests you to do so.
         """
         try:
@@ -184,63 +191,74 @@ class BaseData:
         except TypeError:
             return None
 
-    def size(self, dim: Optional[int] = None) -> Union[Tuple[Optional[int], Optional[int]], Optional[int]]:
-        r"""Returns the size of the adjacency matrix induced by the graph."""
-        size = (self.num_nodes, self.num_nodes)
+    @overload
+    def size(self) -> Tuple[Optional[int], Optional[int]]:
+        pass
+
+    @overload
+    def size(self, dim: int) -> Optional[int]:
+        pass
+
+    def size(
+        self, dim: Optional[int] = None
+    ) -> Union[Tuple[Optional[int], Optional[int]], Optional[int]]:
+        """Returns the size of the adjacency matrix induced by the graph."""
+        size = self.num_nodes, self.num_nodes
         return size if dim is None else size[dim]
 
     @property
     def num_edges(self) -> int:
-        r"""Returns the number of edges in the graph.
+        """Returns the number of edges in the graph.
         For undirected graphs, this will return the number of bi-directional
         edges, which is double the amount of unique edges.
         """
         return sum([v.num_edges for v in self.edge_stores])
 
     def node_attrs(self) -> List[str]:
-        r"""Returns all node-level tensor attribute names."""
+        """Returns all node-level tensor attribute names."""
         return list(set(chain(*[s.node_attrs() for s in self.node_stores])))
 
     def edge_attrs(self) -> List[str]:
-        r"""Returns all edge-level tensor attribute names."""
+        """Returns all edge-level tensor attribute names."""
         return list(set(chain(*[s.edge_attrs() for s in self.edge_stores])))
 
     @property
-    def node_offsets(self) -> Dict[str, int]:
-        out: Dict[str, int] = {}
+    def node_offsets(self) -> Dict[NodeType, int]:
+        out: Dict[NodeType, int] = {}
         offset: int = 0
         for store in self.node_stores:
             out[store._key] = offset
-            offset += store.num_nodes
+            offset = offset + store.num_nodes
         return out
 
     def generate_ids(self):
-        r"""Generates and sets `n_id` and `e_id` attributes to assign
-        each node and edge a continuously ascending and unique ID.
+        """Generates and sets :obj:`n_id` and :obj:`e_id` attributes to assign
+        each node and edge to a continuously ascending and unique ID.
         """
         for store in self.node_stores:
-            store.n_id = paddle.arange(store.num_nodes)
+            store.n_id = paddle.arange(end=store.num_nodes)
         for store in self.edge_stores:
-            store.e_id = paddle.arange(store.num_edges)
+            store.e_id = paddle.arange(end=store.num_edges)
 
     def is_sorted(self, sort_by_row: bool = True) -> bool:
-        r"""Returns `True` if edge indices `edge_index` are sorted.
+        """Returns :obj:`True` if edge indices :obj:`edge_index` are sorted.
 
         Args:
-            sort_by_row (bool, optional): If set to `False`, will require
+            sort_by_row (bool, optional): If set to :obj:`False`, will require
                 column-wise order/by destination node order of
-                `edge_index`. (default: `True`)
+                :obj:`edge_index`. (default: :obj:`True`)
         """
-        return all([store.is_sorted(sort_by_row) for store in self.edge_stores])
+        return all(
+            [store.is_sorted(sort_by_row) for store in self.edge_stores])
 
-    def sort(self, sort_by_row: bool = True) -> "BaseData":
-        r"""Sorts edge indices `edge_index` and their corresponding edge
+    def sort(self, sort_by_row: bool = True) -> Self:
+        """Sorts edge indices :obj:`edge_index` and their corresponding edge
         features.
 
         Args:
-            sort_by_row (bool, optional): If set to `False`, will sort
-                `edge_index` in column-wise order/by destination node.
-                (default: `True`)
+            sort_by_row (bool, optional): If set to :obj:`False`, will sort
+                :obj:`edge_index` in column-wise order/by destination node.
+                (default: :obj:`True`)
         """
         out = copy.copy(self)
         for store in out.edge_stores:
@@ -248,14 +266,22 @@ class BaseData:
         return out
 
     def is_coalesced(self) -> bool:
-        r"""Returns `True` if edge indices `edge_index` are sorted
+        """Returns :obj:`True` if edge indices :obj:`edge_index` are sorted
         and do not contain duplicate entries.
         """
-        return all([store.is_coalesced() for store in self.edge_stores])
+        res = []
+        for store in self.edge_stores:
+            out = store.is_coalesced()
+            if isinstance(out, Tensor):
+                res.append(out.tolist())
+            else:
+                res.append(out)
 
-    def coalesce(self) -> "BaseData":
-        r"""Sorts and removes duplicated entries from edge indices
-        `edge_index`.
+        return all(res)
+
+    def coalesce(self) -> Self:
+        """Sorts and removes duplicated entries from edge indices
+        :obj:`edge_index`.
         """
         out = copy.copy(self)
         for store in out.edge_stores:
@@ -263,28 +289,33 @@ class BaseData:
         return out
 
     def is_sorted_by_time(self) -> bool:
-        r"""Returns `True` if `time` is sorted."""
+        """Returns :obj:`True` if :obj:`time` is sorted."""
         return all([store.is_sorted_by_time() for store in self.stores])
 
-    def sort_by_time(self) -> "BaseData":
-        r"""Sorts data associated with `time` according to `time`."""
+    def sort_by_time(self) -> Self:
+        """Sorts data associated with :obj:`time` according to :obj:`time`."""
         out = copy.copy(self)
         for store in out.stores:
             store.sort_by_time()
         return out
 
-    def snapshot(self, start_time: Union[float, int], end_time: Union[float, int], attr: str = "time") -> "BaseData":
-        r"""Returns a snapshot of `data` to only hold events that occurred
-        in the period `[start_time, end_time]`.
+    def snapshot(
+        self,
+        start_time: Union[float, int],
+        end_time: Union[float, int],
+        attr: str = "time",
+    ) -> Self:
+        """Returns a snapshot of :obj:`data` to only hold events that occurred
+        in period :obj:`[start_time, end_time]`.
         """
         out = copy.copy(self)
         for store in out.stores:
             store.snapshot(start_time, end_time, attr)
         return out
 
-    def up_to(self, end_time: Union[float, int]) -> "BaseData":
-        r"""Returns a snapshot of `data` to only hold events that occurred
-        up to `end_time` (inclusive of `edge_time`).
+    def up_to(self, end_time: Union[float, int]) -> Self:
+        """Returns a snapshot of :obj:`data` to only hold events that occurred
+        up to :obj:`end_time` (inclusive of :obj:`edge_time`).
         """
         out = copy.copy(self)
         for store in out.stores:
@@ -292,31 +323,32 @@ class BaseData:
         return out
 
     def has_isolated_nodes(self) -> bool:
-        r"""Returns :obj:`True` if the graph contains isolated nodes."""
+        """Returns :obj:`True` if the graph contains isolated nodes."""
         return any([store.has_isolated_nodes() for store in self.edge_stores])
 
     def has_self_loops(self) -> bool:
-        r"""Returns :obj:`True` if the graph contains self-loops."""
+        """Returns :obj:`True` if the graph contains self-loops."""
         return any([store.has_self_loops() for store in self.edge_stores])
 
     def is_undirected(self) -> bool:
-        r"""Returns :obj:`True` if graph edges are undirected."""
+        """Returns :obj:`True` if graph edges are undirected."""
         return all([store.is_undirected() for store in self.edge_stores])
 
     def is_directed(self) -> bool:
-        r"""Returns :obj:`True` if graph edges are directed."""
+        """Returns :obj:`True` if graph edges are directed."""
         return not self.is_undirected()
 
     def apply_(self, func: Callable, *args: str):
-        r"""Applies the in-place function :obj:`func`, either to all attributes
+        """Applies the in-place function :obj:`func`, either to all attributes
         or only the ones given in :obj:`*args`.
         """
         for store in self.stores:
+            """Not Support auto convert *.apply_, please judge whether it is Pytorch API and convert by yourself"""
             store.apply_(func, *args)
         return self
 
     def apply(self, func: Callable, *args: str):
-        r"""Applies the function :obj:`func`, either to all attributes or only
+        """Applies the function :obj:`func`, either to all attributes or only
         the ones given in :obj:`*args`.
         """
         for store in self.stores:
@@ -324,84 +356,112 @@ class BaseData:
         return self
 
     def clone(self, *args: str):
-        r"""Performs cloning of tensors, either for all attributes or only the
+        """Performs cloning of tensors, either for all attributes or only the
         ones given in :obj:`*args`.
         """
         return copy.copy(self).apply(lambda x: x.clone(), *args)
 
     def contiguous(self, *args: str):
-        r"""Ensures a contiguous memory layout, either for all attributes or
+        """Ensures a contiguous memory layout, either for all attributes or
         only the ones given in :obj:`*args`.
         """
         return self.apply(lambda x: x.contiguous(), *args)
 
-    def to(self, device: Union[int, str], *args: str, non_blocking: bool = False):
-        r"""Performs tensor device conversion, either for all attributes or
+    def to(self, device: Union[int, str], *args: str,
+           non_blocking: bool = False):
+        """Performs tensor device conversion, either for all attributes or
         only the ones given in :obj:`*args`.
         """
         return self.apply(
-            lambda x: x.astype(device=device, non_blocking=non_blocking), *args
-        )
+            lambda x: x.to(device=device, blocking=not non_blocking), *args)
 
     def cpu(self, *args: str):
-        r"""Copies attributes to CPU memory, either for all attributes or only
+        """Copies attributes to CPU memory, either for all attributes or only
         the ones given in :obj:`*args`.
         """
         return self.apply(lambda x: x.cpu(), *args)
 
-    def cuda(self, device: Optional[Union[int, str]] = None, *args: str, non_blocking: bool = False):
-        r"""Copies attributes to CUDA memory, either for all attributes or only
+    def cuda(
+        self,
+        device: Optional[Union[int, str]] = None,
+        *args: str,
+        non_blocking: bool = False,
+    ):
+        """Copies attributes to CUDA memory, either for all attributes or only
         the ones given in :obj:`*args`.
         """
-        device = 'gpu' if device is None else device
-        return self.apply(lambda x: x.cuda(device, non_blocking=non_blocking), *args)
+        device = "cuda" if device is None else device
+        return self.apply(
+            lambda x: x.cuda(
+                device_id=device2int(device),
+                blocking=  # noqa
+                not non_blocking),  # noqa
+            *args,
+        )
 
     def pin_memory(self, *args: str):
-        r"""Copies attributes to pinned memory, either for all attributes or
+        """Copies attributes to pinned memory, either for all attributes or
         only the ones given in :obj:`*args`.
         """
-        return self.apply(lambda x: x.pin_memory(), *args)
+        raise NotImplementedError
+        # return self.apply(lambda x: x.pin_memory(), *args)
 
     def share_memory_(self, *args: str):
-        r"""Moves attributes to shared memory, either for all attributes or
+        """Moves attributes to shared memory, either for all attributes or
         only the ones given in :obj:`*args`.
         """
-        return self.apply_(lambda x: x.share_memory_(), *args)
+        raise NotImplementedError
+        # return self.apply_(lambda x: x.share_memory_(), *args)
 
     def detach_(self, *args: str):
-        r"""Detaches attributes from the computation graph, either for all
+        """Detaches attributes from the computation graph, either for all
         attributes or only the ones given in :obj:`*args`.
         """
         return self.apply_(lambda x: x.detach_(), *args)
 
     def detach(self, *args: str):
-        r"""Detaches attributes from the computation graph by creating a new
+        """Detaches attributes from the computation graph by creating a new
         tensor, either for all attributes or only the ones given in
         :obj:`*args`.
         """
         return self.apply(lambda x: x.detach(), *args)
 
     def requires_grad_(self, *args: str, requires_grad: bool = True):
-        r"""Tracks gradient computation, either for all attributes or only the
+        """Tracks gradient computation, either for all attributes or only the
         ones given in :obj:`*args`.
         """
-        return self.apply_(
-            lambda x: x.requires_grad_(requires_grad=requires_grad), *args)
+        def func(x, requires_grad):
+            x.requires_grad = requires_grad
+            return x
 
+        return self.apply_(lambda x: func(x, requires_grad), *args)
+
+    def record_stream(self, stream: paddle.device.Stream, *args: str):
+        """Ensures that the tensor memory is not reused for another tensor
+        until all current work queued on :obj:`stream` has been completed,
+        either for all attributes or only the ones given in :obj:`*args`.
+        """
+        raise NotImplementedError
+
+        # return self.apply_(lambda x: x.record_stream(stream), *args)
+
+    @property
     def is_cuda(self) -> bool:
-        r"""Returns :obj:`True` if any :class:`paddle.Tensor` attribute is
+        """Returns :obj:`True` if any :class:`torch.Tensor` attribute is
         stored on the GPU, :obj:`False` otherwise.
         """
         for store in self.stores:
             for value in store.values():
-                if isinstance(value, paddle.Tensor) and value.place.is_gpu_place():
+                if isinstance(value,
+                              paddle.Tensor) and value.place.is_gpu_place():
                     return True
         return False
 
-    # Deprecated functions ####################################################
+    @deprecated(details="use 'has_isolated_nodes' instead")
     def contains_isolated_nodes(self) -> bool:
         return self.has_isolated_nodes()
 
+    @deprecated(details="use 'has_self_loops' instead")
     def contains_self_loops(self) -> bool:
         return self.has_self_loops()
 
@@ -578,7 +638,6 @@ class Data(BaseData, FeatureStore, GraphStore):
             info = ',\n'.join(info)
             return f'{cls}(\n{info}\n)'
 
-
     @property
     def num_nodes(self) -> Optional[int]:
         return super().num_nodes
@@ -643,11 +702,11 @@ class Data(BaseData, FeatureStore, GraphStore):
                           raise_on_error)
 
         if 'edge_index' in self:
-            if self.edge_index.dim() != 2 or self.edge_index.size(0) != 2:
+            if self.edge_index.dim() != 2 or self.edge_index.shape[0] != 2:
                 status = False
                 warn_or_raise(
                     f"'edge_index' needs to be of shape [2, num_edges] in "
-                    f"'{cls_name}' (found {self.edge_index.size()})",
+                    f"'{cls_name}' (found {tuple(self.edge_index.shape)})",
                     raise_on_error)
 
         if 'edge_index' in self and self.edge_index.numel() > 0:
@@ -699,11 +758,8 @@ class Data(BaseData, FeatureStore, GraphStore):
             )
         else:
             edge_index = None
-            edge_mask = paddle.ones(
-                shape=[self.num_edges],  # shape should be a list or tuple in Paddle
-                dtype='bool',  # Paddle uses 'bool' as the dtype for boolean tensors
-                place=subset.place  # device is replaced with 'place' in Paddle
-            )
+            edge_mask = paddle.ones(shape=[self.num_edges], dtype='bool',
+                                    device=subset.place)
 
         data = copy.copy(self)
 
@@ -782,7 +838,9 @@ class Data(BaseData, FeatureStore, GraphStore):
             store = self._store
             node_type_names = store.__dict__.get('_node_type_names', None)
         if node_type_names is None:
-            node_type_names = [str(i) for i in paddle.unique(node_type).tolist()]
+            node_type_names = [
+                str(i) for i in paddle.unique(node_type).tolist()
+            ]
 
         if edge_type is None:
             edge_type = self._store.get('edge_type', None)
@@ -814,8 +872,10 @@ class Data(BaseData, FeatureStore, GraphStore):
         node_ids, index_map = {}, paddle.empty_like(node_type)
 
         for i, key in enumerate(node_type_names):
-            node_ids[i] = paddle.nonzero(node_type == i, as_tuple=False).view(-1)
-            index_map[node_ids[i]] = paddle.arange(len(node_ids[i]), device=index_map.device)
+            node_ids[i] = paddle.nonzero(node_type == i,
+                                         as_tuple=False).view(-1)
+            index_map[node_ids[i]] = paddle.arange(len(node_ids[i]),
+                                                   device=index_map.place)
 
         # We iterate over edge types to find the local edge indices:
         edge_ids = {}
@@ -990,11 +1050,11 @@ class Data(BaseData, FeatureStore, GraphStore):
     # Deprecated functions ####################################################
 
     @property
-    @deprecated(details="use 'data.face.size(-1)' instead")
+    @deprecated(details="use 'data.face.shape[-1]' instead")
     def num_faces(self) -> Optional[int]:
         r"""Returns the number of faces in the mesh."""
         if 'face' in self._store and isinstance(self.face, Tensor):
-            return self.face.size(self.__cat_dim__('face', self.face))
+            return self.face.shape[self.__cat_dim__('face', self.face)]
         return None
 
     # FeatureStore interface ##################################################
@@ -1025,7 +1085,7 @@ class Data(BaseData, FeatureStore, GraphStore):
         return False
 
     def _get_tensor_size(self, attr: TensorAttr) -> Tuple:
-        return self._get_tensor(attr).size()
+        return tuple(self._get_tensor(attr).shape)
 
     def get_all_tensor_attrs(self) -> List[TensorAttr]:
         r"""Obtains all feature attributes stored in `Data`."""
@@ -1045,7 +1105,7 @@ class Data(BaseData, FeatureStore, GraphStore):
         row, col = edge_index
 
         if edge_attr.layout == EdgeLayout.COO:
-            self.edge_index = paddle.concat([row.unsqueeze(0), col.unsqueeze(0)], axis=0)
+            self.edge_index = paddle.stack(x=[row, col], axis=0)
         elif edge_attr.layout == EdgeLayout.CSR:
             self.adj = SparseTensor(
                 rowptr=row,
@@ -1117,38 +1177,37 @@ class Data(BaseData, FeatureStore, GraphStore):
 
 
 def size_repr(key: Any, value: Any, indent: int = 0) -> str:
-    pad = ' ' * indent
-    if isinstance(value, Tensor) and value.dim() == 0:
+    pad = " " * indent
+    if isinstance(value, paddle.Tensor) and value.dim() == 0:
         out = value.item()
-    elif isinstance(value, Tensor) and getattr(value, 'is_nested', False):
-        out = str(list(value.to_padded_tensor(padding=0.0).size()))
-    elif isinstance(value, Tensor):
-        out = str(list(value.shape))
+    elif isinstance(value, paddle.Tensor) and getattr(value, "is_nested",
+                                                      False):
+        out = str(list(tuple(value.to_padded_tensor(padding=0.0).shape)))
+    elif isinstance(value, paddle.Tensor):
+        out = str(list(tuple(value.shape)))
     elif isinstance(value, np.ndarray):
-        out = str(list(value.shape))
+        out = str(list(tuple(value.shape)))
     elif isinstance(value, SparseTensor):
-        out = str(value.shape)[:-1] + f', nnz={value.nnz()}]'
+        out = str(value.sizes())[:-1] + f", nnz={value.nnz()}]"
     elif isinstance(value, TensorFrame):
-        out = (f'{value.__class__.__name__}('
-               f'[{value.num_rows}, {value.num_cols}])')
+        out = f"{value.__class__.__name__}([{value.num_rows}, {value.num_cols}])"
     elif isinstance(value, str):
         out = f"'{value}'"
     elif isinstance(value, (Sequence, set)):
         out = str([len(value)])
     elif isinstance(value, Mapping) and len(value) == 0:
-        out = '{}'
+        out = "{}"
     elif (isinstance(value, Mapping) and len(value) == 1
           and not isinstance(list(value.values())[0], Mapping)):
         lines = [size_repr(k, v, 0) for k, v in value.items()]
-        out = '{ ' + ', '.join(lines) + ' }'
+        out = "{ " + ", ".join(lines) + " }"
     elif isinstance(value, Mapping):
         lines = [size_repr(k, v, indent + 2) for k, v in value.items()]
-        out = '{\n' + ',\n'.join(lines) + ',\n' + pad + '}'
+        out = "{\n" + ",\n".join(lines) + ",\n" + pad + "}"
     else:
         out = str(value)
-
-    key = str(key).replace("'", '')
-    return f'{pad}{key}={out}'
+    key = str(key).replace("'", "")
+    return f"{pad}{key}={out}"
 
 
 def warn_or_raise(msg: str, raise_on_error: bool = True):

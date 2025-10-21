@@ -32,7 +32,7 @@ def contains_isolated_nodes(
     """
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     edge_index, _ = remove_self_loops(edge_index)
-    return paddle.unique(edge_index.flatten()).shape[0] < num_nodes
+    return paddle.unique(edge_index.view(-1)).numel() < num_nodes
 
 
 def remove_isolated_nodes(
@@ -73,12 +73,13 @@ def remove_isolated_nodes(
     edge_index, edge_attr, loop_edge_index, loop_edge_attr = out
 
     # Create a mask tensor filled with False (paddle.zeros is used)
-    mask = paddle.zeros([num_nodes], dtype=paddle.bool, place=edge_index.place)
-    mask[edge_index.flatten()] = 1
+    mask = paddle.zeros([num_nodes], dtype=paddle.bool,
+                        device=edge_index.place)
+    mask[edge_index.view(-1)] = 1
 
     # Create the assoc tensor initialized to -1
-    assoc = paddle.full([num_nodes], -1, dtype=paddle.int64)
-    assoc[mask] = paddle.arange(mask.sum().item(), dtype=paddle.int64)
+    assoc = paddle.full((num_nodes, ), -1, dtype="int64", device=mask.place)
+    assoc[mask] = paddle.arange(end=mask.sum())
 
     # Modify edge_index with assoc
     edge_index = assoc[edge_index]
@@ -89,8 +90,8 @@ def remove_isolated_nodes(
     loop_mask = loop_mask & mask
 
     # Create loop_assoc initialized to -1
-    loop_assoc = paddle.full_like(assoc, -1, dtype=paddle.int64)
-    loop_assoc[loop_edge_index[0]] = paddle.arange(loop_edge_index.shape[1], dtype=paddle.int64)
+    loop_assoc = paddle.full_like(assoc, -1)
+    loop_assoc[loop_edge_index[0]] = paddle.arange(loop_edge_index.shape[1])
 
     # Get loop_idx
     loop_idx = loop_assoc[loop_mask]
@@ -103,7 +104,7 @@ def remove_isolated_nodes(
 
     if edge_attr is not None:
         assert loop_edge_attr is not None
-        loop_edge_attr = paddle.index_select(loop_edge_attr, loop_idx)
+        loop_edge_attr = loop_edge_attr[loop_idx]
         edge_attr = paddle.concat([edge_attr, loop_edge_attr], axis=0)
 
     return edge_index, edge_attr, mask

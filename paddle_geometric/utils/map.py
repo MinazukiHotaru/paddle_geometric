@@ -5,10 +5,11 @@ import numpy as np
 import paddle
 from paddle import Tensor
 
+from paddle_geometric import place2devicestr
+
 
 def is_integer_dtype(dtype):
-    """
-    Checks if the given dtype is an integer type.
+    """Checks if the given dtype is an integer type.
 
     Args:
         dtype (paddle.dtype): The data type to check.
@@ -25,8 +26,7 @@ def map_index(
     max_index: Optional[Union[int, Tensor]] = None,
     inclusive: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    """
-    Maps indices in `src` to the positional value of their
+    """Maps indices in `src` to the positional value of their
     corresponding occurrence in `index`.
     Indices must be strictly positive.
 
@@ -53,49 +53,109 @@ def map_index(
         >>> map_index(src, index)
         (Tensor([1, 2, -1, 2, 0], dtype=int64), Tensor([True, True, False, True, True]))
     """
-    if not is_integer_dtype(src.dtype) or not is_integer_dtype(index.dtype):
-        raise ValueError("Expected 'src' and 'index' to be integer tensors.")
-
-    # if src.place != index.place:
-    #     raise ValueError(f"'src' and 'index' must be on the same device. all in gpu:0")
+    if src.is_floating_point():
+        raise ValueError(f"Expected 'src' to be an index (got '{src.dtype}')")
+    if index.is_floating_point():
+        raise ValueError(
+            f"Expected 'index' to be an index (got '{index.dtype}')")
+    if src.place != index.place:
+        raise ValueError(
+            f"Both 'src' and 'index' must be on the same device (got '{src.place}' and '{index.place}')"
+        )
 
     if max_index is None:
-        max_index = max(src.max(), index.max()).item()
+        max_index = paddle.maximum(x=src.max(), y=index.max())
+    THRESHOLD = 40000000 if src.place.is_gpu_place() else 10000000
 
-    # Memory-efficient method if `max_index` is within threshold
-    THRESHOLD = 40_000_000 if src.place.is_gpu_place() else 10_000_000
     if max_index <= THRESHOLD:
-        assoc = paddle.full((max_index + 1,), -1, dtype=src.dtype)
-        assoc = paddle.scatter(assoc, index, paddle.arange(index.shape[0], dtype=src.dtype))
-
-        out = paddle.gather(assoc, src)
         if inclusive:
-            if paddle.any(out == -1):
-                raise ValueError("Found invalid entries in 'src' that do not have a corresponding entry in 'index'.")
+            assoc = paddle.empty(shape=(max_index + 1, ), dtype=src.dtype,
+                                 device=src.place)
+        else:
+            assoc = paddle.full(shape=(max_index + 1, ), fill_value=-1,
+                                dtype=src.dtype, device=src.place)
+        assoc[index] = paddle.arange(dtype=src.dtype, end=index.size,
+                                     device=src.place)
+        out = assoc[src]
+        if inclusive:
             return out, None
         else:
             mask = out != -1
             return out[mask], mask
 
-    # CPU-based fallback using pandas
-    try:
+    WITH_CUDF = False
+    if src.place.is_gpu_place():
+        try:
+            import cudf
+
+            WITH_CUDF = True
+        except ImportError:
+            import pandas as pd
+
+            warnings.warn(
+                "Using CPU-based processing within 'map_index' which "
+                "may cause slowdowns and device synchronization. Consider "
+                "installing 'cudf' to accelerate computation")
+    else:
         import pandas as pd
-        left_ser = pd.Series(src.numpy(), name='left_ser')
+    if not WITH_CUDF:
+        left_ser = pd.Series(src.cpu().numpy(), name="left_ser")
         right_ser = pd.Series(
-            index.numpy(),
-            index=np.arange(index.shape[0]),
-            name='right_ser',
+            index=index.cpu().numpy(),
+            data=pd.RangeIndex(0, index.shape[0]),
+            name="right_ser",
         )
-        result = pd.merge(left_ser, right_ser, how='left', left_on='left_ser', right_index=True)
-        out = paddle.to_tensor(result['right_ser'].fillna(-1).values, place=src.place, dtype=src.dtype)
-
+        result = pd.merge(left_ser, right_ser, how="left", left_on="left_ser",
+                          right_index=True)
+        out_numpy = result["right_ser"].values
+        if place2devicestr(index.place) == "mps" and issubclass(
+                out_numpy.dtype.type, np.floating):
+            out_numpy = out_numpy.astype(np.float32)
+        out = paddle.to_tensor(data=out_numpy).to(index.place)
+        if out.is_floating_point() and inclusive:
+            raise ValueError(
+                "Found invalid entries in 'src' that do not have a "
+                "corresponding entry in 'index'. Set `inclusive=False` to "
+                "ignore these entries.")
+        if out.is_floating_point():
+            _x_dtype_ = paddle.isnan(x=out).dtype
+            mask = paddle.isnan(x=out).logical_not_().cast_(_x_dtype_)
+            out = out[mask].to(index.dtype)
+            return out, mask
         if inclusive:
-            if paddle.any(out == -1):
-                raise ValueError("Found invalid entries in 'src' that do not have a corresponding entry in 'index'.")
             return out, None
         else:
             mask = out != -1
             return out[mask], mask
-    except ImportError:
-        warnings.warn("Install 'pandas' for better performance.")
-        raise
+    else:
+        left_ser = cudf.Series(src, name="left_ser")
+        right_ser = cudf.Series(index=index,
+                                data=cudf.RangeIndex(0, index.shape[0]),
+                                name="right_ser")
+        result = cudf.merge(
+            left_ser,
+            right_ser,
+            how="left",
+            left_on="left_ser",
+            right_index=True,
+            sort=True,
+        )
+        if inclusive:
+            try:
+                out = paddle.utils.dlpack.from_dlpack(
+                    dlpack=result["right_ser"].to_dlpack())
+            except ValueError as err:
+                raise ValueError(
+                    "Found invalid entries in 'src' that do not have a "
+                    "corresponding entry in 'index'. Set `inclusive=False` to "
+                    "ignore these entries.") from err
+
+        else:
+            out = paddle.utils.dlpack.from_dlpack(
+                dlpack=result["right_ser"].fillna(-1).to_dlpack())
+        out = out[src.argsort().argsort()]
+        if inclusive:
+            return out, None
+        else:
+            mask = out != -1
+            return out[mask], mask

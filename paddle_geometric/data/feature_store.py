@@ -68,7 +68,11 @@ class TensorAttr(CastMixin):
     def is_set(self, key: str) -> bool:
         r"""Whether an attribute is set in :obj:`TensorAttr`."""
         assert key in self.__dataclass_fields__
-        return getattr(self, key) != _FieldStatus.UNSET
+        data = getattr(self, key)
+        if isinstance(data,
+                      Tensor) and (not isinstance(_FieldStatus.UNSET, Tensor)):
+            return True
+        return data != _FieldStatus.UNSET
 
     def is_fully_specified(self) -> bool:
         r"""Whether the :obj:`TensorAttr` has no unset fields."""
@@ -82,9 +86,6 @@ class TensorAttr(CastMixin):
         return self
 
     def update(self, attr: 'TensorAttr') -> 'TensorAttr':
-        r"""Updates an :class:`TensorAttr` with set attributes from another
-        :class:`TensorAttr`.
-        """
         for key in self.__dataclass_fields__:
             if attr.is_set(key):
                 setattr(self, key, getattr(attr, key))
@@ -467,7 +468,7 @@ class FeatureStore(ABC):
         tensor: FeatureTensorType,
     ) -> FeatureTensorType:
         if isinstance(attr.index, Tensor) and isinstance(tensor, np.ndarray):
-            return torch.from_numpy(tensor)
+            return paddle.to_tensor(data=tensor)
         if isinstance(attr.index, np.ndarray) and isinstance(tensor, Tensor):
             return tensor.detach().cpu().numpy()
         return tensor

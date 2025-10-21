@@ -22,8 +22,10 @@ def mask_select(src: Tensor, dim: int, mask: Tensor) -> Tensor:
     assert dim >= 0 and dim < src.ndim
 
     src = src.transpose(perm=dim2perm(src.ndim, 0, dim)) if dim != 0 else src
+    src = src.contiguous()
     out = src[mask]
     out = out.transpose(perm=dim2perm(out.ndim, 0, dim)) if dim != 0 else out
+    out = out.contiguous()
     return out
 
 

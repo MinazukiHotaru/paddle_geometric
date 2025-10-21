@@ -1,5 +1,4 @@
-import typing
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, overload
 
 import paddle
 from paddle import Tensor
@@ -7,8 +6,6 @@ from paddle import Tensor
 from paddle_geometric.typing import OptTensor
 from paddle_geometric.utils import coalesce, sort_edge_index
 from paddle_geometric.utils.num_nodes import maybe_num_nodes
-
-from typing import overload
 
 MISSING = '???'
 
@@ -83,17 +80,14 @@ def is_undirected(  # noqa: F811
         sort_by_row=False,
     )
 
-    if not paddle.all(paddle.equal(edge_index1[0], edge_index2[1])):
+    if not paddle.equal_all(x=edge_index1[0], y=edge_index2[1]).item():
         return False
-
-    if not paddle.all(paddle.equal(edge_index1[1], edge_index2[0])):
+    if not paddle.equal_all(x=edge_index1[1], y=edge_index2[0]).item():
         return False
-
     assert isinstance(edge_attrs1, list) and isinstance(edge_attrs2, list)
     for edge_attr1, edge_attr2 in zip(edge_attrs1, edge_attrs2):
-        if not paddle.all(paddle.equal(edge_attr1, edge_attr2)):
+        if not paddle.equal_all(x=edge_attr1, y=edge_attr2).item():
             return False
-
     return True
 
 
@@ -195,7 +189,8 @@ def to_undirected(  # noqa: F811
         edge_attr = MISSING
 
     row, col = edge_index[0], edge_index[1]
-    row, col = paddle.concat([row, col], axis=0), paddle.concat([col, row], axis=0)
+    row, col = paddle.concat([row, col], axis=0), paddle.concat([col, row],
+                                                                axis=0)
     edge_index = paddle.stack([row, col], axis=0)
 
     if isinstance(edge_attr, paddle.Tensor):

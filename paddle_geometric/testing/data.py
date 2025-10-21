@@ -16,8 +16,10 @@ def get_random_edge_index(
     device: Optional[str] = None,
     coalesce: bool = False,
 ) -> Tensor:
-    row = paddle.randint(0, num_src_nodes, shape=(num_edges,), dtype=dtype)
-    col = paddle.randint(0, num_dst_nodes, shape=(num_edges,), dtype=dtype)
+    row = paddle.randint(0, num_src_nodes, shape=(num_edges, ), dtype=dtype)
+    row = row.to(device=device)
+    col = paddle.randint(0, num_dst_nodes, shape=(num_edges, ), dtype=dtype)
+    col = col.to(device=device)
     edge_index = paddle.stack([row, col], axis=0)
 
     if coalesce:
@@ -73,7 +75,8 @@ class FakeHeteroDataset(InMemoryDataset):
         data['paper'].y = paddle.randint(0, 4, shape=[num_papers])
 
         perm = paddle.randperm(num_papers)
-        data['paper'].train_mask = paddle.zeros([num_papers], dtype=paddle.bool)
+        data['paper'].train_mask = paddle.zeros([num_papers],
+                                                dtype=paddle.bool)
         data['paper'].train_mask[perm[:60]] = True
         data['paper'].val_mask = paddle.zeros([num_papers], dtype=paddle.bool)
         data['paper'].val_mask[perm[60:80]] = True

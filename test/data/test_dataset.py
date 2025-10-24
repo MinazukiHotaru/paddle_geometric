@@ -4,7 +4,7 @@ import paddle
 import pytest
 
 from paddle_geometric import EdgeIndex, Index
-from paddle_geometric.data import Data, InMemoryDataset
+from paddle_geometric.data import Data, HeteroData, InMemoryDataset
 from paddle_geometric.testing import withPackage
 from paddle_geometric.typing import SparseTensor
 
@@ -289,32 +289,32 @@ def test_collate_with_new_dimension():
     assert data2.y.tolist() == [1]
 
 
-# def test_hetero_in_memory_dataset():
-#     data1 = HeteroData()
-#     data1.y = paddle.randn(5)
-#     data1['paper'].x = paddle.randn(10, 16)
-#     data1['paper', 'paper'].edge_index = paddle.randint(0, 10, (2, 30)).long()
+def test_hetero_in_memory_dataset():
+    data1 = HeteroData()
+    data1.y = paddle.randn(5)
+    data1['paper'].x = paddle.randn(10, 16)
+    data1['paper', 'paper'].edge_index = paddle.randint(0, 10, (2, 30)).long()
 
-#     data2 = HeteroData()
-#     data2.y = paddle.randn(5)
-#     data2['paper'].x = paddle.randn(10, 16)
-#     data2['paper', 'paper'].edge_index = paddle.randint(0, 10, (2, 30)).long()
+    data2 = HeteroData()
+    data2.y = paddle.randn(5)
+    data2['paper'].x = paddle.randn(10, 16)
+    data2['paper', 'paper'].edge_index = paddle.randint(0, 10, (2, 30)).long()
 
-#     dataset = MyTestDataset([data1, data2])
-#     assert str(dataset) == 'MyTestDataset(2)'
-#     assert len(dataset) == 2
+    dataset = MyTestDataset([data1, data2])
+    assert str(dataset) == 'MyTestDataset(2)'
+    assert len(dataset) == 2
 
-#     assert len(dataset[0]) == 3
-#     assert dataset[0].y.tolist() == data1.y.tolist()
-#     assert dataset[0]['paper'].x.tolist() == data1['paper'].x.tolist()
-#     assert (dataset[0]['paper', 'paper'].edge_index.tolist() == data1[
-#         'paper', 'paper'].edge_index.tolist())
+    assert len(dataset[0]) == 3
+    assert dataset[0].y.tolist() == data1.y.tolist()
+    assert dataset[0]['paper'].x.tolist() == data1['paper'].x.tolist()
+    assert (dataset[0]['paper', 'paper'].edge_index.tolist() == data1[
+        'paper', 'paper'].edge_index.tolist())
 
-#     assert len(dataset[1]) == 3
-#     assert dataset[1].y.tolist() == data2.y.tolist()
-#     assert dataset[1]['paper'].x.tolist() == data2['paper'].x.tolist()
-#     assert (dataset[1]['paper', 'paper'].edge_index.tolist() == data2[
-#         'paper', 'paper'].edge_index.tolist())
+    assert len(dataset[1]) == 3
+    assert dataset[1].y.tolist() == data2.y.tolist()
+    assert dataset[1]['paper'].x.tolist() == data2['paper'].x.tolist()
+    assert (dataset[1]['paper', 'paper'].edge_index.tolist() == data2[
+        'paper', 'paper'].edge_index.tolist())
 
 
 def test_override_behavior():

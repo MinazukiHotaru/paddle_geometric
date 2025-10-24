@@ -896,7 +896,7 @@ class Data(BaseData, FeatureStore, GraphStore):
                     data[key][attr] = value[node_ids[i]]
 
             if len(data[key]) == 0:
-                data[key].num_nodes = node_ids[i].size(0)
+                data[key].num_nodes = node_ids[i].shape[0]
 
         for i, key in enumerate(edge_type_names):
             src, _, dst = key

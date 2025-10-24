@@ -16,7 +16,6 @@ from typing import (
     Union,
 )
 
-import paddle
 from paddle import Tensor
 from tqdm import tqdm
 
@@ -124,11 +123,11 @@ class InMemoryDataset(Dataset):
     def save(cls, data_list: Sequence[BaseData], path: str) -> None:
         r"""Saves a list of data objects to the file path :obj:`path`."""
         data, slices = cls.collate(data_list)
-        fs.torch_save((data.to_dict(), slices, data.__class__), path)
+        fs.paddle_save((data.to_dict(), slices, data.__class__), path)
 
     def load(self, path: str, data_cls: Type[BaseData] = Data) -> None:
         r"""Loads the dataset from the file path :obj:`path`."""
-        out = fs.torch_load(path)
+        out = fs.paddle_load(path)
         assert isinstance(out, tuple)
         assert len(out) == 2 or len(out) == 3
         if len(out) == 2:  # Backward compatibility.
@@ -184,7 +183,7 @@ class InMemoryDataset(Dataset):
         root: Optional[str] = None,
         backend: str = 'sqlite',
         log: bool = True,
-    ) -> 'torch_geometric.data.OnDiskDataset':
+    ) -> 'paddle_geometric.data.OnDiskDataset':
         r"""Converts the :class:`InMemoryDataset` to a :class:`OnDiskDataset`
         variant. Useful for distributed training and hardware instances with
         limited amount of shared memory.

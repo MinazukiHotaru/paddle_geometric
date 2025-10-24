@@ -15,9 +15,8 @@ from typing import (
     Union,
 )
 
-
-import paddle
 import numpy as np
+import paddle
 from paddle import Tensor
 
 from paddle_geometric.data.data import BaseData
@@ -165,7 +164,7 @@ class Dataset(paddle.io.Dataset):
         elif y.numel() == y.shape[0] and not paddle.is_floating_point(y):
             return int(paddle.max(y)) + 1
         elif y.numel() == y.shape[0] and paddle.is_floating_point(y):
-            num_classes = paddle.unique(y).shape[0]
+            num_classes = paddle.unique(y).numel()
             if num_classes > 2:
                 warnings.warn("Found floating-point labels while calling "
                               "`dataset.num_classes`. Returning the number of "
@@ -173,7 +172,7 @@ class Dataset(paddle.io.Dataset):
                               "is expected before proceeding.")
             return num_classes
         else:
-            return y.size(-1)
+            return y.shape[-1]
 
     @property
     def num_classes(self) -> int:
@@ -184,7 +183,8 @@ class Dataset(paddle.io.Dataset):
         # with `RandomLinkSplit`, so we take care of this case here as well:
         data_list = _get_flattened_data_list([data for data in self])
         if 'y' in data_list[0] and isinstance(data_list[0].y, paddle.Tensor):
-            y = paddle.concat([data.y for data in data_list if 'y' in data], axis=0)
+            y = paddle.concat([data.y for data in data_list if 'y' in data],
+                              axis=0)
         else:
             y = paddle.to_tensor([data.y for data in data_list if 'y' in data])
 
@@ -241,8 +241,7 @@ class Dataset(paddle.io.Dataset):
                 "The `pre_transform` argument differs from the one used in "
                 "the pre-processed version of this dataset. If you want to "
                 "make use of another pre-processing technique, pass "
-                "`force_reload=True` explicitly to reload the dataset."
-            )
+                "`force_reload=True` explicitly to reload the dataset.")
 
         f = osp.join(self.processed_dir, 'pre_filter.pt')
         if osp.exists(f) and paddle.load(f) != _repr(self.pre_filter):
@@ -250,8 +249,7 @@ class Dataset(paddle.io.Dataset):
                 "The `pre_filter` argument differs from the one used in "
                 "the pre-processed version of this dataset. If you want to "
                 "make use of another pre-filtering technique, pass "
-                "`force_reload=True` explicitly to reload the dataset."
-            )
+                "`force_reload=True` explicitly to reload the dataset.")
 
         if not self.force_reload and files_exist(self.processed_paths):
             return
@@ -263,9 +261,9 @@ class Dataset(paddle.io.Dataset):
         self.process()
 
         path = osp.join(self.processed_dir, 'pre_transform.pt')
-        fs.torch_save(_repr(self.pre_transform), path)
+        fs.paddle_save(_repr(self.pre_transform), path)
         path = osp.join(self.processed_dir, 'pre_filter.pt')
-        fs.torch_save(_repr(self.pre_filter), path)
+        fs.paddle_save(_repr(self.pre_filter), path)
 
         if self.log and 'pytest' not in sys.modules:
             print('Done!', file=sys.stderr)
@@ -367,7 +365,7 @@ class Dataset(paddle.io.Dataset):
 
     def get_summary(self) -> Any:
         r"""Collects summary statistics for the dataset."""
-        from torch_geometric.data.summary import Summary
+        from paddle_geometric.data.summary import Summary
         return Summary.from_dataset(self)
 
     def print_summary(self, fmt: str = "psql") -> None:
@@ -400,7 +398,7 @@ class Dataset(paddle.io.Dataset):
         <https://pytorch.org/data/main/tutorial.html>`_ for further background
         on DataPipes.
         """
-        from torch_geometric.data.datapipes import DatasetAdapter
+        from paddle_geometric.data.datapipes import DatasetAdapter
 
         return DatasetAdapter(self)
 

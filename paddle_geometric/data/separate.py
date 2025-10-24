@@ -88,8 +88,8 @@ def _separate(
             value._is_undirected = values._cat_metadata.is_undirected[idx]
 
         if (decrement and incs is not None
-                and (incs.ndim > 1 or int(incs[idx]) != 0)):
-            value = value - incs[idx]
+                and (incs.dim() > 1 or int(incs[idx]) != 0)):
+            value = value - incs[idx].to(value.place)
 
         return value
 

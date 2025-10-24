@@ -63,14 +63,16 @@ def coalesce(
 
     idx = paddle.empty(shape=[
         num_edges + 1,
-    ], dtype=edge_index[0].dtype)
+    ], dtype=edge_index[0].dtype, device=edge_index.place)
     idx[0] = -1
     idx[1:] = edge_index[1 - int(sort_by_row)]
-    idx[1:].multiply_(y=paddle.to_tensor(num_nodes)).add_(
-        y=paddle.to_tensor(edge_index[int(sort_by_row)]))
+    idx[1:] = idx[1:] * num_nodes + paddle.to_tensor(
+        edge_index[int(sort_by_row)])
+
     is_undirected = False
     if isinstance(edge_index, EdgeIndex):
         is_undirected = edge_index.is_undirected
+
     if not is_sorted:
         idx[1:], perm = index_sort(idx[1:], max_value=num_nodes * num_nodes)
         if isinstance(edge_index, paddle.Tensor):
@@ -109,11 +111,10 @@ def coalesce(
     dim_size: Optional[int] = None
     if isinstance(edge_attr, (Tensor, list, tuple)) and len(edge_attr) > 0:
         dim_size = edge_index.shape[1]
-        idx = paddle.arange(0, num_edges)
-        _x_dtype_ = mask.dtype
-        idx.subtract_(
-            y=paddle.to_tensor(mask.logical_not_().cast_(_x_dtype_).cumsum(
-                axis=0)))
+        idx = paddle.arange(0, num_edges, device=mask.place)
+        idx.subtract_(y=paddle.to_tensor(
+            mask.logical_not_().cast_(paddle.uint8).cumsum(
+                axis=0), dtype=idx.dtype))
 
     if edge_attr is None:
         return edge_index, None

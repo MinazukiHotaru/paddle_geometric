@@ -259,7 +259,7 @@ class BaseStorage(MutableMapping):
         r"""Copies attributes to CUDA memory, either for all attributes or only
         the ones given in :obj:`*args`.
         """
-        return self.apply(lambda x: x.cuda(device, non_blocking=non_blocking),
+        return self.apply(lambda x: x.cuda(device, blocking=not non_blocking),
                           *args)
 
     def pin_memory(self, *args: str) -> Self:

@@ -1,6 +1,7 @@
 from typing import Callable, Optional
 
 import paddle
+
 from paddle_geometric.data import Data, InMemoryDataset
 
 
@@ -75,7 +76,7 @@ class KarateClub(InMemoryDataset):
         # (we just use the first one).
         train_mask = paddle.zeros([y.shape[0]], dtype='bool')
         for i in range(int(y.max().item()) + 1):
-            train_mask[(y == i).nonzero()[0]] = True
+            train_mask[(y == i).nonzero(as_tuple=False)[0]] = True
 
         data = Data(x=x, edge_index=edge_index, y=y, train_mask=train_mask)
 

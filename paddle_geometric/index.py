@@ -1,22 +1,13 @@
 import functools
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
 import warnings
+from typing import Any, Callable, List, NamedTuple, Optional
+
 import paddle
-import paddle_geometric.typing as pyg_typing
 from paddle import Tensor
 
-from .dispatcher import BaseTensorSubclass, register_for #register_concat_for, register_add_for, register_sub_for
+import paddle_geometric.typing as pyg_typing
+
+from .dispatcher import BaseTensorSubclass, register_for
 
 # HANDLED_FUNCTIONS: Dict[Callable, Callable] = {}
 
@@ -30,28 +21,29 @@ from .dispatcher import BaseTensorSubclass, register_for #register_concat_for, r
 # Tensor.__array_function__ = __array_function__
 
 
-
-def ptr2index(ptr: paddle.Tensor, output_size: Optional[int] = None) -> paddle.Tensor:
+def ptr2index(ptr: paddle.Tensor,
+              output_size: Optional[int] = None) -> paddle.Tensor:
     index = paddle.arange(dtype=ptr.dtype, end=ptr.size - 1)
     return index.repeat_interleave(repeats=ptr.diff())
 
+
+# def index2ptr(index: Tensor, size: Optional[int] = None) -> Tensor:
+
+#     raise NotImplementedError
+#     # if size is None:
+#     #     size = int(index.max()) + 1 if index.shape[0] > 0 else 0
+
+#     # return paddle.incubate.sparse.convert_indices_from_coo_to_csr(
+#     #     index, size, out_int32=index.dtype != paddle.int64)
+
+
 def index2ptr(index: Tensor, size: Optional[int] = None) -> Tensor:
+    """Convert a 1D index tensor (row indices in COO) to CSR indptr.
 
-    raise NotImplementedError
-    # if size is None:
-    #     size = int(index.max()) + 1 if index.shape[0] > 0 else 0
-
-    # return paddle.incubate.sparse.convert_indices_from_coo_to_csr(
-    #     index, size, out_int32=index.dtype != paddle.int64)
-
-
-
-def index2ptr(index: Tensor, size: Optional[int] = None) -> Tensor:
-    """
-    Convert a 1D index tensor (row indices in COO) to CSR indptr.
     Args:
         index (Tensor): 1D integer tensor of indices.
         size (Optional[int]): number of rows (dim_size). If None, inferred as max(index)+1 or 0.
+
     Returns:
         Tensor: indptr of shape [size + 1], dtype int32 if index.dtype != int64 else int64.
     """
@@ -69,10 +61,10 @@ def index2ptr(index: Tensor, size: Optional[int] = None) -> Tensor:
     # special cases
     if size == 0:
         # empty dimension -> single zero entry
-        return paddle.zeros(shape=(1,), dtype=out_dtype)
+        return paddle.zeros(shape=(1, ), dtype=out_dtype)
     if index.numel() == 0:
         # no entries -> zeros of length size+1
-        return paddle.zeros(shape=(size + 1,), dtype=out_dtype)
+        return paddle.zeros(shape=(size + 1, ), dtype=out_dtype)
 
     # ensure no negative indices
     if (index < 0).any():
@@ -82,17 +74,18 @@ def index2ptr(index: Tensor, size: Optional[int] = None) -> Tensor:
     counts = paddle.bincount(index.astype('int64'), minlength=size)
     counts = counts.astype(out_dtype)
     # prefix-sum: indptr[0] = 0, indptr[i+1] = sum(counts[:i+1])
-    indptr = paddle.concat([paddle.zeros((1,), dtype=out_dtype),
-                            counts.cumsum(axis=0, dtype=out_dtype)], axis=0)
+    indptr = paddle.concat([
+        paddle.zeros((1, ), dtype=out_dtype),
+        counts.cumsum(axis=0, dtype=out_dtype)
+    ], axis=0)
 
     return indptr
+
 
 class CatMetadata(NamedTuple):
     nnz: List[int]
     dim_size: List[Optional[int]]
     is_sorted: List[bool]
-
-
 
 
 def assert_valid_dtype(tensor: Tensor) -> None:
@@ -126,7 +119,9 @@ def assert_sorted(func: Callable) -> Callable:
 
     return wrapper
 
+
 # HANDLED_FUNCTIONS = {}
+
 
 class Index(BaseTensorSubclass):
     r"""A one-dimensional `index` tensor with additional (meta)data attached.
@@ -144,13 +139,8 @@ class Index(BaseTensorSubclass):
     _indptr: Optional[Tensor] = None
     _cat_metadata: Optional[CatMetadata] = None
 
-    def __init__(self, 
-        data: Any,
-        *args: Any,
-        dim_size: Optional[int] = None,
-        is_sorted: bool = False,
-        **kwargs: Any
-        ):
+    def __init__(self, data: Any, *args: Any, dim_size: Optional[int] = None,
+                 is_sorted: bool = False, **kwargs: Any):
         if 'device' in kwargs:
             kwargs['place'] = kwargs['device']
             del kwargs['device']
@@ -158,8 +148,8 @@ class Index(BaseTensorSubclass):
             data = paddle.to_tensor(data, *args, **kwargs)
         elif len(args) > 0:
             raise TypeError(
-                f"new() received an invalid combination of arguments - got (Tensor, {', '.join(str(type(arg)) for arg in args)})"
-            )
+                f"new() received an invalid combination of arguments - "
+                f"got (Tensor, {', '.join(str(type(arg)) for arg in args)})")
         elif len(kwargs) > 0:
             raise TypeError(
                 f"new() received invalid keyword arguments - got {set(kwargs.keys())})"
@@ -183,6 +173,7 @@ class Index(BaseTensorSubclass):
         self._dim_size = dim_size
         self._is_sorted = is_sorted
         self._indptr = indptr
+
     @property
     def _data(self) -> Tensor:
         return self.data
@@ -218,6 +209,7 @@ class Index(BaseTensorSubclass):
     @property
     def is_sorted(self) -> bool:
         return self._is_sorted
+
     @property
     def dtype(self) -> paddle.dtype:
         return self._data.dtype
@@ -226,7 +218,8 @@ class Index(BaseTensorSubclass):
 
     def get_dim_size(self) -> int:
         if self._dim_size is None:
-            self._dim_size = int(self._data.max()) + 1 if self.numel() > 0 else 0
+            self._dim_size = int(
+                self._data.max()) + 1 if self.numel() > 0 else 0
         assert isinstance(self._dim_size, int)
         return self._dim_size
 
@@ -241,11 +234,12 @@ class Index(BaseTensorSubclass):
 
             else:
                 fill_value = paddle.full(
-                    shape=(dim_size - self._indptr.size + 1,),
+                    shape=(dim_size - self._indptr.size + 1, ),
                     fill_value=self._indptr[-1],
                     dtype=self._indptr.dtype,
                 )
-                self._indptr = paddle.concat([self._indptr, fill_value], axis=0)
+                self._indptr = paddle.concat([self._indptr, fill_value],
+                                             axis=0)
 
         self._dim_size = dim_size
 
@@ -277,13 +271,12 @@ class Index(BaseTensorSubclass):
             'is_sorted': self.is_sorted,
             '_indptr': self._indptr
         }
+
     @classmethod
     def from_dict(cls, data_dict) -> 'Index':
         r"""Creates a new :class:`Index` instance from a dictionary."""
-        out = cls(data_dict['data'],
-                  dim_size=data_dict['dim_size'],
-                  is_sorted=data_dict['is_sorted']
-        )
+        out = cls(data_dict['data'], dim_size=data_dict['dim_size'],
+                  is_sorted=data_dict['is_sorted'])
         out._indptr = data_dict.get('_indptr', None)
         return out
 
@@ -300,11 +293,11 @@ class Index(BaseTensorSubclass):
 
     def as_tensor(self) -> Tensor:
         return self._data
-    
+
     @property
-    def device(self,):
+    def device(self, ):
         place = self.place
-        if  place.is_cpu_place():
+        if place.is_cpu_place():
             device = 'cpu'
         elif place.is_gpu_place():
             device_id = place.gpu_device_id()
@@ -330,9 +323,10 @@ class Index(BaseTensorSubclass):
         if self.is_sorted:
             suffixes.append('is_sorted=True')
         return f"{prefix}{tensor_str}, {', '.join(suffixes)})"
+
     def __str__(self) -> str:
         return self.__repr__()
-    
+
     def _shallow_copy(self) -> 'Index':
         out = Index(self._data)
         out._dim_size = self._dim_size
@@ -349,25 +343,28 @@ class Index(BaseTensorSubclass):
         return self
 
     def clone(self):
-        index = Index(self._data.clone(), dim_size=self.dim_size, is_sorted=self.is_sorted)
+        index = Index(self._data.clone(), dim_size=self.dim_size,
+                      is_sorted=self.is_sorted)
         if self._indptr is not None:
             index._indptr = self._indptr.clone()
         return index
-    def cuda(self,):
+
+    def cuda(self, ):
         if self.place.is_gpu_place():
             return self
         index = self.clone()
         index.data = index.data.cuda()
         if self._indptr is not None:
-            index._indptr =index._indptr.cuda()
+            index._indptr = index._indptr.cuda()
         return index
-    def cpu(self,):
+
+    def cpu(self, ):
         if self.place.is_cpu_place():
             return self
         index = self.clone()
         index.data = index.data.cpu()
         if self._indptr is not None:
-            index._indptr =index._indptr.cpu()
+            index._indptr = index._indptr.cpu()
         return index
 
     def flip(self, axis):
@@ -382,7 +379,7 @@ class Index(BaseTensorSubclass):
 
         out = self.data.index_select(
             axis=axis,
-            index = index._data if isinstance(index, Index) else index,
+            index=index._data if isinstance(index, Index) else index,
         )
 
         if isinstance(self, Index):
@@ -394,13 +391,13 @@ class Index(BaseTensorSubclass):
         data = self.data.to(*args, **kwargs)
         if data.dtype not in pyg_typing.INDEX_DTYPES:
             return data
-        
+
         if self.data.data_ptr() != data.data_ptr():
             out = Index(data)
         else:  # In-place:
             self.data = data
             out = self
-        
+
         # Copy metadata:
         out._dim_size = self._dim_size
         out._is_sorted = self._is_sorted
@@ -411,19 +408,23 @@ class Index(BaseTensorSubclass):
             out._indptr = self._indptr.to(*args, **kwargs)
 
         return out
-    
+
     def long(self):
         return self.to(dtype=paddle.int64)
+
     def int(self):
         return self.to(dtype=paddle.int32)
-    
+
     @paddle.utils.decorator_utils.param_one_alias(['axis', 'dim'])
     def sort(self, axis=-1, descending=False, stable=False):
         if self.is_sorted and not descending:
-            return self, paddle.arange(self.data.numel(), device=self.data.place)
-        
-        data = paddle.sort(x=self._data, axis=axis, descending=descending, stable=stable)
-        perm = paddle.argsort(x=self._data, axis=axis, descending=descending, stable=stable)
+            return self, paddle.arange(self.data.numel(),
+                                       device=self.data.place)
+
+        data = paddle.sort(x=self._data, axis=axis, descending=descending,
+                           stable=stable)
+        perm = paddle.argsort(x=self._data, axis=axis, descending=descending,
+                              stable=stable)
 
         out = Index(data)
         out._dim_size = self._dim_size
@@ -431,20 +432,20 @@ class Index(BaseTensorSubclass):
         if not descending:
             out._is_sorted = True
         return out, perm
-    
+
     def narrow(self, dim: int, start, length):
 
         end = start + length
 
         if start <= 0 and end > self.data.shape[dim]:
             return self._shallow_copy()
-        
+
         data = paddle.slice(self.data, axes=[dim], starts=[start], ends=[end])
         out = Index(data)
         out._dim_size = self._dim_size
         out._is_sorted = self._is_sorted
         return out
-    
+
     def __getitem__(self, indices):
         if isinstance(indices, slice):
             data = self.data[indices]
@@ -455,7 +456,7 @@ class Index(BaseTensorSubclass):
             out._dim_size = self.dim_size
             if indices.step is None or indices.step >= 0:
                 out._is_sorted = self.is_sorted
-            
+
             return out
         elif indices is Ellipsis:
             return self._shallow_copy()
@@ -464,7 +465,8 @@ class Index(BaseTensorSubclass):
             if data.dim() != 1:
                 return data
             out = Index(data)
-            if indices.dtype in (paddle.bool, paddle.uint8):  # 1. `index[mask]`.
+            if indices.dtype in (paddle.bool,
+                                 paddle.uint8):  # 1. `index[mask]`.
                 out._dim_size = self.dim_size
                 out._is_sorted = self.is_sorted
 
@@ -491,7 +493,7 @@ class Index(BaseTensorSubclass):
             out._dim_size = self.dim_size
             if slice_indice.step is None or slice_indice.step >= 0:
                 out._is_sorted = self.is_sorted
-            
+
             return out
         elif isinstance(indices, tuple) and None in indices:
             data = self.data[indices]
@@ -512,7 +514,7 @@ class Index(BaseTensorSubclass):
             out._dim_size = self.dim_size
             if slice_indice.step is None or slice_indice.step >= 0:
                 out._is_sorted = self.is_sorted
-            
+
             return out
         elif isinstance(indices, int):
             return self._data[indices]
@@ -525,9 +527,10 @@ class Index(BaseTensorSubclass):
     def __radd__(self, other):
         return paddle.add(other, self)
 
-    def __sub__(self, other): 
+    def __sub__(self, other):
         return paddle.subtract(self, other)
-    def __rsub__(self, other): 
+
+    def __rsub__(self, other):
         return paddle.subtract(other, self)
 
 
@@ -539,7 +542,7 @@ def concat_index(x, axis=0, name=None):
     if any([not isinstance(tensor, Index) for tensor in x]):
         return concat_paddle
 
-    out =  Index(concat_paddle)
+    out = Index(concat_paddle)
 
     nnz_list = [t.numel() for t in x]
     dim_size_list = [t.dim_size for t in x]  # type: ignore
@@ -577,10 +580,10 @@ def add_index(x, y, **kwargs):
     out_data = x_data + y_data
     if out_data.dtype not in pyg_typing.INDEX_DTYPES:
         return out_data
-    
+
     if out_data.dim() != 1:
         return out_data
-    
+
     out = Index(out_data)
     if isinstance(x, Tensor) and x.numel() <= 1:
         x = int(x)
@@ -616,10 +619,10 @@ def subtract_index(x, y, **kwargs):
     out_data = x_data - y_data
     if out_data.dtype not in pyg_typing.INDEX_DTYPES:
         return out_data
-    
+
     if out_data.dim() != 1:
         return out_data
-    
+
     out = Index(out_data)
     if not isinstance(x, Tensor):
         return out
@@ -634,7 +637,25 @@ def subtract_index(x, y, **kwargs):
         out._is_sorted = x.is_sorted
     return out
 
-    
+
+@register_for('narrow')(Index)
+def narrow_index(input: Index, dim: int, start, length) -> Index:
+
+    end = start + length
+    if start <= 0 and end > input.data.shape[dim]:
+        return input._shallow_copy()
+
+    out = paddle.narrow(input.data, dim, start, length)
+
+    out = Index(out)
+    out._dim_size = input.dim_size
+    # NOTE We could potentially maintain the `indptr` attribute here,
+    # but it is not really clear if this is worth it. The most important
+    # information `is_sorted` needs to be maintained though:
+    out._is_sorted = input.is_sorted
+    return out
+
+
 # @implements(paddle.slice)
 # def slice(input, axes, starts, ends):
 

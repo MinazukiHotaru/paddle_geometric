@@ -58,8 +58,7 @@ def narrow(src: Union[Tensor, List[Any]], dim: int, start: int,
         return paddle.index_select(src, index=index, axis=dim)
 
     if isinstance(src, Tensor):
-        start_2 = src.shape[dim] + start if start < 0 else start
-        return paddle.slice(src, [dim], [start_2], [start_2 + length])
+        return src.narrow(dim, start, length)
 
     if isinstance(src, list):
         if dim != 0:

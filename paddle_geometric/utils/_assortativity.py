@@ -1,5 +1,4 @@
 import paddle
-from paddle import Tensor
 
 from paddle_geometric.typing import Adj, SparseTensor
 from paddle_geometric.utils import coalesce, degree
@@ -19,11 +18,11 @@ def assortativity(edge_index: Adj) -> float:
 
     Returns:
         The value of the degree assortativity coefficient for the input
-        graph :math:`\in [-1, 1]`
+        graph :math:`\\in [-1, 1]`
 
     Example:
-        >>> edge_index = paddle.to_tensor([[0, 1, 2, 3, 2],
-        ...                                [1, 2, 0, 1, 3]])
+        >>> edge_index = torch.tensor([[0, 1, 2, 3, 2],
+        ...                            [1, 2, 0, 1, 3]])
         >>> assortativity(edge_index)
         -0.666667640209198
     """
@@ -31,35 +30,27 @@ def assortativity(edge_index: Adj) -> float:
         adj: SparseTensor = edge_index
         row, col, _ = adj.coo()
     else:
-        assert isinstance(edge_index, Tensor)
+        assert isinstance(edge_index, paddle.Tensor)
         row, col = edge_index
 
-    device = row.place
-    out_deg = degree(row, dtype='int64')
-    in_deg = degree(col, dtype='int64')
-    degrees = paddle.unique(paddle.concat([out_deg, in_deg]))
-    mapping = paddle.zeros([degrees.max().item() + 1], dtype=row.dtype)
-    mapping = paddle.scatter(mapping, degrees, paddle.arange(degrees.shape[0], dtype=row.dtype))
-
-    # Compute degree mixing matrix (joint probability distribution) `M`
+    out_deg = degree(row, dtype="int64")
+    in_deg = degree(col, dtype="int64")
+    degrees = paddle.unique(x=paddle.concat(x=[out_deg, in_deg]))
+    mapping = paddle.zeros(shape=degrees.max().item() + 1, dtype=row.dtype)
+    mapping[degrees] = paddle.arange(end=degrees.shape[0])
     num_degrees = degrees.shape[0]
-    src_deg = paddle.gather(mapping, out_deg[row])
-    dst_deg = paddle.gather(mapping, in_deg[col])
-
-    pairs = paddle.stack([src_deg, dst_deg], axis=0)
-    occurrence = paddle.ones([pairs.shape[1]], dtype=row.dtype)
+    src_deg = mapping[out_deg[row]]
+    dst_deg = mapping[in_deg[col]]
+    pairs = paddle.stack(x=[src_deg, dst_deg], axis=0)
+    occurrence = paddle.ones(shape=pairs.shape[1])
     pairs, occurrence = coalesce(pairs, occurrence)
     M = to_dense_adj(pairs, edge_attr=occurrence, max_num_nodes=num_degrees)[0]
-    # normalization
     M /= M.sum()
-
-    # Numeric assortativity coefficient, computed by Pearson correlation coefficient of the node degrees
-    x = y = degrees.astype('float32')
+    x = y = degrees.float()
     a, b = M.sum(axis=0), M.sum(axis=1)
-
-    vara = (a * x**2).sum() - ((a * x).sum())**2
-    varb = (b * x**2).sum() - ((b * x).sum())**2
-    xy = paddle.outer(x, y)
-    ab = paddle.outer(a, b)
+    vara = (a * x**2).sum() - (a * x).sum()**2
+    varb = (b * x**2).sum() - (b * x).sum()**2
+    xy = paddle.outer(x=x, y=y)
+    ab = paddle.outer(x=a, y=b)
     out = (xy * (M - ab)).sum() / (vara * varb).sqrt()
     return out.item()

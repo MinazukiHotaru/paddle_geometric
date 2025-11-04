@@ -55,39 +55,30 @@ def get_laplacian(
         >>> lap_rw = get_laplacian(edge_index, edge_weight, normalization='rw')
     """
     if normalization is not None:
-        assert normalization in ['sym', 'rw'], "Invalid normalization"
-
+        assert normalization in ["sym", "rw"]
     edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
-
     if edge_weight is None:
-        edge_weight = paddle.ones([edge_index.shape[1]], dtype=dtype)
-
+        edge_weight = paddle.ones(shape=edge_index.shape[1], dtype=dtype)
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
-
     row, col = edge_index[0], edge_index[1]
-    deg = scatter(edge_weight, row, 0, dim_size=num_nodes, reduce='sum')
-
+    deg = scatter(edge_weight, row, 0, dim_size=num_nodes, reduce="sum")
     if normalization is None:
-        # L = D - A.
         edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
-        edge_weight = paddle.concat([-edge_weight, deg], axis=0)
-    elif normalization == 'sym':
-        # Compute A_norm = -D^{-1/2} A D^{-1/2}.
-        deg_inv_sqrt = deg.pow(-0.5)
-        deg_inv_sqrt = paddle.where(deg_inv_sqrt == float('inf'), paddle.zeros_like(deg_inv_sqrt), deg_inv_sqrt)
+        edge_weight = paddle.concat(x=[-edge_weight, deg], axis=0)
+    elif normalization == "sym":
+        deg_inv_sqrt = deg.pow_(y=-0.5)
+        deg_inv_sqrt.masked_fill_(mask=deg_inv_sqrt == float("inf"), value=0)
         edge_weight = deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
-
-        # L = I - A_norm.
-        edge_index, edge_weight = add_self_loops(
-            edge_index, -edge_weight, fill_value=1.0, num_nodes=num_nodes)
+        assert isinstance(edge_weight, paddle.Tensor)
+        edge_index, edge_weight = add_self_loops(edge_index, -edge_weight,
+                                                 fill_value=1.0,
+                                                 num_nodes=num_nodes)
     else:
-        # Compute A_norm = -D^{-1} A.
         deg_inv = 1.0 / deg
-        deg_inv = paddle.where(deg_inv == float('inf'), paddle.zeros_like(deg_inv), deg_inv)
+        deg_inv.masked_fill_(mask=deg_inv == float("inf"), value=0)
         edge_weight = deg_inv[row] * edge_weight
-
-        # L = I - A_norm.
-        edge_index, edge_weight = add_self_loops(
-            edge_index, -edge_weight, fill_value=1.0, num_nodes=num_nodes)
-
+        assert isinstance(edge_weight, paddle.Tensor)
+        edge_index, edge_weight = add_self_loops(edge_index, -edge_weight,
+                                                 fill_value=1.0,
+                                                 num_nodes=num_nodes)
     return edge_index, edge_weight

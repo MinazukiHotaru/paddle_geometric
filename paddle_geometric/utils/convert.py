@@ -2,28 +2,28 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
 
 import paddle
-from paddle import Tensor
 
+import paddle_geometric
 from paddle_geometric.utils.num_nodes import maybe_num_nodes
 
 
 def to_scipy_sparse_matrix(
-    edge_index: Tensor,
-    edge_attr: Optional[Tensor] = None,
+    edge_index: paddle.Tensor,
+    edge_attr: Optional[paddle.Tensor] = None,
     num_nodes: Optional[int] = None,
 ) -> Any:
-    r"""Converts a graph given by edge indices and edge attributes to a scipy
+    """Converts a graph given by edge indices and edge attributes to a scipy
     sparse matrix.
 
     Args:
-        edge_index (Tensor): The edge indices.
+        edge_index (LongTensor): The edge indices.
         edge_attr (Tensor, optional): Edge weights or multi-dimensional
             edge features. (default: :obj:`None`)
         num_nodes (int, optional): The number of nodes, *i.e.*
             :obj:`max_val + 1` of :attr:`index`. (default: :obj:`None`)
 
     Examples:
-        >>> edge_index = paddle.to_tensor([
+        >>> edge_index = torch.tensor([
         ...     [0, 1, 1, 2, 2, 3],
         ...     [1, 0, 2, 1, 3, 2],
         ... ])
@@ -33,49 +33,47 @@ def to_scipy_sparse_matrix(
     """
     import scipy.sparse as sp
 
-    row, col = edge_index.cpu().numpy()
-
+    row, col = edge_index.cpu()
     if edge_attr is None:
-        edge_attr = paddle.ones([row.shape[0]], dtype='float32')
+        edge_attr = paddle.ones(shape=row.shape[0])
     else:
-        edge_attr = edge_attr.reshape([-1]).numpy()
+        edge_attr = edge_attr.view(-1).cpu()
         assert edge_attr.shape[0] == row.shape[0]
-
     N = maybe_num_nodes(edge_index, num_nodes)
-    out = sp.coo_matrix((edge_attr, (row, col)), shape=(N, N))
+    out = sp.coo_matrix((edge_attr.numpy(), (row.numpy(), col.numpy())),
+                        (N, N))
     return out
 
 
-def from_scipy_sparse_matrix(A: Any) -> Tuple[Tensor, Tensor]:
-    r"""Converts a scipy sparse matrix to edge indices and edge attributes.
+def from_scipy_sparse_matrix(A: Any) -> Tuple[paddle.Tensor, paddle.Tensor]:
+    """Converts a scipy sparse matrix to edge indices and edge attributes.
 
     Args:
         A (scipy.sparse): A sparse matrix.
 
     Examples:
-        >>> edge_index = paddle.to_tensor([
+        >>> edge_index = torch.tensor([
         ...     [0, 1, 1, 2, 2, 3],
         ...     [1, 0, 2, 1, 3, 2],
         ... ])
         >>> adj = to_scipy_sparse_matrix(edge_index)
+        >>> # `edge_index` and `edge_weight` are both returned
         >>> from_scipy_sparse_matrix(adj)
         (tensor([[0, 1, 1, 2, 2, 3],
-                 [1, 0, 2, 1, 3, 2]]),
-         tensor([1., 1., 1., 1., 1., 1.]))
+                [1, 0, 2, 1, 3, 2]]),
+        tensor([1., 1., 1., 1., 1., 1.]))
     """
     A = A.tocoo()
-    row = paddle.to_tensor(A.row, dtype='int64')
-    col = paddle.to_tensor(A.col, dtype='int64')
-    edge_index = paddle.stack([row, col], axis=0)
-    edge_weight = paddle.to_tensor(A.data, dtype='float32')
+    row = paddle.to_tensor(data=A.row).to("int64")
+    col = paddle.to_tensor(data=A.col).to("int64")
+    edge_index = paddle.stack(x=[row, col], axis=0)
+    edge_weight = paddle.to_tensor(data=A.data)
     return edge_index, edge_weight
 
 
 def to_networkx(
-    data: Union[
-        'paddle_geometric.data.Data',
-        'paddle_geometric.data.HeteroData',
-    ],
+    data: Union["paddle_geometric.data.Data",
+                "paddle_geometric.data.HeteroData"],
     node_attrs: Optional[Iterable[str]] = None,
     edge_attrs: Optional[Iterable[str]] = None,
     graph_attrs: Optional[Iterable[str]] = None,
@@ -83,7 +81,7 @@ def to_networkx(
     to_multi: bool = False,
     remove_self_loops: bool = False,
 ) -> Any:
-    r"""Converts a :class:`paddle_geometric.data.Data` instance to a
+    """Converts a :class:`paddle_geometric.data.Data` instance to a
     :obj:`networkx.Graph` if :attr:`to_undirected` is set to :obj:`True`, or
     a directed :obj:`networkx.DiGraph` otherwise.
 
@@ -99,47 +97,54 @@ def to_networkx(
         to_undirected (bool or str, optional): If set to :obj:`True`, will
             return a :class:`networkx.Graph` instead of a
             :class:`networkx.DiGraph`.
+            By default, will include all edges and make them undirected.
+            If set to :obj:`"upper"`, the undirected graph will only correspond
+            to the upper triangle of the input adjacency matrix.
+            If set to :obj:`"lower"`, the undirected graph will only correspond
+            to the lower triangle of the input adjacency matrix.
+            Only applicable in case the :obj:`data` object holds a homogeneous
+            graph. (default: :obj:`False`)
         to_multi (bool, optional): if set to :obj:`True`, will return a
-            :class:`networkx.MultiGraph` or a :class:`networkx:MultiDiGraph`.
+            :class:`networkx.MultiGraph` or a :class:`networkx:MultiDiGraph`
+            (depending on the :obj:`to_undirected` option), which will not drop
+            duplicated edges that may exist in :obj:`data`.
             (default: :obj:`False`)
         remove_self_loops (bool, optional): If set to :obj:`True`, will not
             include self-loops in the resulting graph. (default: :obj:`False`)
 
     Examples:
-        >>> edge_index = paddle.to_tensor([
+        >>> edge_index = torch.tensor([
         ...     [0, 1, 1, 2, 2, 3],
         ...     [1, 0, 2, 1, 3, 2],
         ... ])
         >>> data = Data(edge_index=edge_index, num_nodes=4)
         >>> to_networkx(data)
         <networkx.classes.digraph.DiGraph at 0x2713fdb40d0>
+
     """
     import networkx as nx
 
     from paddle_geometric.data import HeteroData
 
-    to_undirected_upper: bool = to_undirected == 'upper'
-    to_undirected_lower: bool = to_undirected == 'lower'
-
+    to_undirected_upper: bool = to_undirected == "upper"
+    to_undirected_lower: bool = to_undirected == "lower"
     to_undirected = to_undirected is True
     to_undirected |= to_undirected_upper or to_undirected_lower
     assert isinstance(to_undirected, bool)
-
     if isinstance(data, HeteroData) and to_undirected:
-        raise ValueError("'to_undirected' is not supported in "
-                         "'to_networkx' for heterogeneous graphs")
-
+        raise ValueError(
+            "'to_undirected' is not supported in 'to_networkx' for heterogeneous graphs"
+        )
     if to_undirected:
         G = nx.MultiGraph() if to_multi else nx.Graph()
     else:
         G = nx.MultiDiGraph() if to_multi else nx.DiGraph()
 
     def to_networkx_value(value: Any) -> Any:
-        return value.tolist() if isinstance(value, Tensor) else value
+        return value.tolist() if isinstance(value, paddle.Tensor) else value
 
     for key in graph_attrs or []:
         G.graph[key] = to_networkx_value(data[key])
-
     node_offsets = data.node_offsets
     for node_store in data.node_stores:
         start = node_offsets[node_store._key]
@@ -147,40 +152,36 @@ def to_networkx(
         for i in range(node_store.num_nodes):
             node_kwargs: Dict[str, Any] = {}
             if isinstance(data, HeteroData):
-                node_kwargs['type'] = node_store._key
+                node_kwargs["type"] = node_store._key
             for key in node_attrs or []:
                 node_kwargs[key] = to_networkx_value(node_store[key][i])
-
             G.add_node(start + i, **node_kwargs)
-
     for edge_store in data.edge_stores:
         for i, (v, w) in enumerate(edge_store.edge_index.t().tolist()):
             if to_undirected_upper and v > w:
                 continue
             elif to_undirected_lower and v < w:
                 continue
-            elif remove_self_loops and v == w and not edge_store.is_bipartite():
+            elif remove_self_loops and v == w and not edge_store.is_bipartite(
+            ):
                 continue
-
             edge_kwargs: Dict[str, Any] = {}
             if isinstance(data, HeteroData):
                 v = v + node_offsets[edge_store._key[0]]
                 w = w + node_offsets[edge_store._key[-1]]
-                edge_kwargs['type'] = edge_store._key
+                edge_kwargs["type"] = edge_store._key
             for key in edge_attrs or []:
                 edge_kwargs[key] = to_networkx_value(edge_store[key][i])
-
             G.add_edge(v, w, **edge_kwargs)
-
     return G
 
 
 def from_networkx(
     G: Any,
-    group_node_attrs: Optional[Union[List[str], Literal['all']]] = None,
-    group_edge_attrs: Optional[Union[List[str], Literal['all']]] = None,
-) -> 'paddle_geometric.data.Data':
-    r"""Converts a :obj:`networkx.Graph` or :obj:`networkx.DiGraph` to a
+    group_node_attrs: Optional[Union[List[str], Literal["all"]]] = None,
+    group_edge_attrs: Optional[Union[List[str], Literal["all"]]] = None,
+) -> "paddle_geometric.data.Data":
+    """Converts a :obj:`networkx.Graph` or :obj:`networkx.DiGraph` to a
     :class:`paddle_geometric.data.Data` instance.
 
     Args:
@@ -197,108 +198,98 @@ def from_networkx(
         be numeric.
 
     Examples:
-        >>> edge_index = paddle.to_tensor([
+        >>> edge_index = torch.tensor([
         ...     [0, 1, 1, 2, 2, 3],
         ...     [1, 0, 2, 1, 3, 2],
         ... ])
         >>> data = Data(edge_index=edge_index, num_nodes=4)
         >>> g = to_networkx(data)
+        >>> # A `Data` object is returned
         >>> from_networkx(g)
         Data(edge_index=[2, 6], num_nodes=4)
     """
     import networkx as nx
+
     from paddle_geometric.data import Data
 
     G = G.to_directed() if not nx.is_directed(G) else G
-
     mapping = dict(zip(G.nodes(), range(G.number_of_nodes())))
-    edge_index = paddle.zeros([2, G.number_of_edges()], dtype="int64")
+    edge_index = paddle.empty(shape=(2, G.number_of_edges()), dtype="int64")
     for i, (src, dst) in enumerate(G.edges()):
         edge_index[0, i] = mapping[src]
         edge_index[1, i] = mapping[dst]
-
     data_dict: Dict[str, Any] = defaultdict(list)
-    data_dict['edge_index'] = edge_index
-
+    data_dict["edge_index"] = edge_index
     node_attrs: List[str] = []
     if G.number_of_nodes() > 0:
         node_attrs = list(next(iter(G.nodes(data=True)))[-1].keys())
-
     edge_attrs: List[str] = []
     if G.number_of_edges() > 0:
         edge_attrs = list(next(iter(G.edges(data=True)))[-1].keys())
-
     if group_node_attrs is not None and not isinstance(group_node_attrs, list):
         group_node_attrs = node_attrs
-
     if group_edge_attrs is not None and not isinstance(group_edge_attrs, list):
         group_edge_attrs = edge_attrs
-
     for i, (_, feat_dict) in enumerate(G.nodes(data=True)):
         if set(feat_dict.keys()) != set(node_attrs):
-            raise ValueError('Not all nodes contain the same attributes')
+            raise ValueError("Not all nodes contain the same attributes")
         for key, value in feat_dict.items():
             data_dict[str(key)].append(value)
-
     for i, (_, _, feat_dict) in enumerate(G.edges(data=True)):
         if set(feat_dict.keys()) != set(edge_attrs):
-            raise ValueError('Not all edges contain the same attributes')
+            raise ValueError("Not all edges contain the same attributes")
         for key, value in feat_dict.items():
-            key = f'edge_{key}' if key in node_attrs else key
+            key = f"edge_{key}" if key in node_attrs else key
             data_dict[str(key)].append(value)
-
     for key, value in G.graph.items():
-        if key == 'node_default' or key == 'edge_default':
-            continue  # Do not load default attributes.
-        key = f'graph_{key}' if key in node_attrs else key
+        if key == "node_default" or key == "edge_default":
+            continue
+        key = f"graph_{key}" if key in node_attrs else key
         data_dict[str(key)] = value
-
     for key, value in data_dict.items():
-        if isinstance(value, (tuple, list)) and isinstance(value[0], Tensor):
-            data_dict[key] = paddle.stack(value, axis=0)
+        if isinstance(value,
+                      (tuple, list)) and isinstance(value[0], paddle.Tensor):
+            data_dict[key] = paddle.stack(x=value, axis=0)
         else:
             try:
-                data_dict[key] = paddle.to_tensor(value)
+                data_dict[key] = paddle.as_tensor(value)
             except Exception:
                 pass
-
     data = Data.from_dict(data_dict)
-
     if group_node_attrs is not None:
         xs = []
         for key in group_node_attrs:
             x = data[key]
-            x = x.reshape([-1, 1]) if len(x.shape) <= 1 else x
+            x = x.view(-1, 1) if x.dim() <= 1 else x
             xs.append(x)
             del data[key]
-        data.x = paddle.concat(xs, axis=-1)
-
+        data.x = paddle.concat(x=xs, axis=-1)
     if group_edge_attrs is not None:
         xs = []
         for key in group_edge_attrs:
-            key = f'edge_{key}' if key in node_attrs else key
+            key = f"edge_{key}" if key in node_attrs else key
             x = data[key]
-            x = x.reshape([-1, 1]) if len(x.shape) <= 1 else x
+            x = x.view(-1, 1) if x.dim() <= 1 else x
             xs.append(x)
             del data[key]
-        data.edge_attr = paddle.concat(xs, axis=-1)
-
-    if data.x is None and getattr(data, "pos", None) is None:
+        data.edge_attr = paddle.concat(x=xs, axis=-1)
+    if data.x is None and data.pos is None:
         data.num_nodes = G.number_of_nodes()
-
     return data
+
+
 def to_networkit(
-    edge_index: Tensor,
-    edge_weight: Optional[Tensor] = None,
+    edge_index: paddle.Tensor,
+    edge_weight: Optional[paddle.Tensor] = None,
     num_nodes: Optional[int] = None,
     directed: bool = True,
 ) -> Any:
-    r"""Converts a :obj:`(edge_index, edge_weight)` tuple to a
+    """Converts a :obj:`(edge_index, edge_weight)` tuple to a
     :class:`networkit.Graph`.
 
     Args:
-        edge_index (paddle.Tensor): The edge indices of the graph.
-        edge_weight (paddle.Tensor, optional): The edge weights of the graph.
+        edge_index (torch.Tensor): The edge indices of the graph.
+        edge_weight (torch.Tensor, optional): The edge weights of the graph.
             (default: :obj:`None`)
         num_nodes (int, optional): The number of nodes in the graph.
             (default: :obj:`None`)
@@ -308,29 +299,21 @@ def to_networkit(
     import networkit as nk
 
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
-
-    g = nk.graph.Graph(
-        num_nodes,
-        weighted=edge_weight is not None,
-        directed=directed,
-    )
-
+    g = nk.graph.Graph(num_nodes, weighted=edge_weight is not None,
+                       directed=directed)
     if edge_weight is None:
-        edge_weight = paddle.ones([edge_index.shape[1]])
-
+        edge_weight = paddle.ones(shape=edge_index.shape[1])
     if not directed:
         mask = edge_index[0] <= edge_index[1]
         edge_index = edge_index[:, mask]
         edge_weight = edge_weight[mask]
-
-    for (u, v), w in zip(edge_index.t().numpy().tolist(), edge_weight.numpy().tolist()):
+    for (u, v), w in zip(edge_index.t().tolist(), edge_weight.tolist()):
         g.addEdge(u, v, w)
-
     return g
 
 
-def from_networkit(g: Any) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""Converts a :class:`networkit.Graph` to a
+def from_networkit(g: Any) -> Tuple[paddle.Tensor, Optional[paddle.Tensor]]:
+    """Converts a :class:`networkit.Graph` to a
     :obj:`(edge_index, edge_weight)` tuple.
     If the :class:`networkit.Graph` is not weighted, the returned
     :obj:`edge_weight` will be :obj:`None`.
@@ -340,7 +323,6 @@ def from_networkit(g: Any) -> Tuple[Tensor, Optional[Tensor]]:
     """
     is_directed = g.isDirected()
     is_weighted = g.isWeighted()
-
     edge_indices, edge_weights = [], []
     for u, v, w in g.iterEdgesWeights():
         edge_indices.append([u, v])
@@ -348,23 +330,22 @@ def from_networkit(g: Any) -> Tuple[Tensor, Optional[Tensor]]:
         if not is_directed:
             edge_indices.append([v, u])
             edge_weights.append(w)
-
-    edge_index = paddle.to_tensor(edge_indices, dtype="int64").t()
-    edge_weight = paddle.to_tensor(edge_weights, dtype="float32") if is_weighted else None
-
+    edge_index = paddle.tensor(edge_indices).t().contiguous()
+    edge_weight = paddle.tensor(edge_weights) if is_weighted else None
     return edge_index, edge_weight
 
 
-def to_trimesh(data: 'paddle_geometric.data.Data') -> Any:
-    r"""Converts a :class:`paddle_geometric.data.Data` instance to a
+def to_trimesh(data: "paddle_geometric.data.Data") -> Any:
+    """Converts a :class:`paddle_geometric.data.Data` instance to a
     :obj:`trimesh.Trimesh`.
 
     Args:
         data (paddle_geometric.data.Data): The data object.
 
     Example:
-        >>> pos = paddle.to_tensor([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype="float32")
-        >>> face = paddle.to_tensor([[0, 1, 2], [1, 2, 3]]).t()
+        >>> pos = torch.tensor([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]],
+        ...                    dtype=torch.float)
+        >>> face = torch.tensor([[0, 1, 2], [1, 2, 3]]).t()
 
         >>> data = Data(pos=pos, face=face)
         >>> to_trimesh(data)
@@ -374,23 +355,24 @@ def to_trimesh(data: 'paddle_geometric.data.Data') -> Any:
 
     assert data.pos is not None
     assert data.face is not None
-
     return trimesh.Trimesh(
-        vertices=data.pos.numpy(),
-        faces=data.face.t().numpy(),
+        vertices=data.pos.detach().cpu().numpy(),
+        faces=data.face.detach().t().cpu().numpy(),
         process=False,
     )
 
-def from_trimesh(mesh: Any) -> 'paddle_geometric.data.Data':
-    r"""Converts a :obj:`trimesh.Trimesh` to a
+
+def from_trimesh(mesh: Any) -> "paddle_geometric.data.Data":
+    """Converts a :obj:`trimesh.Trimesh` to a
     :class:`paddle_geometric.data.Data` instance.
 
     Args:
         mesh (trimesh.Trimesh): A :obj:`trimesh` mesh.
 
     Example:
-        >>> pos = paddle.to_tensor([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype="float32")
-        >>> face = paddle.to_tensor([[0, 1, 2], [1, 2, 3]]).transpose([1, 0])
+        >>> pos = torch.tensor([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]],
+        ...                    dtype=torch.float)
+        >>> face = torch.tensor([[0, 1, 2], [1, 2, 3]]).t()
 
         >>> data = Data(pos=pos, face=face)
         >>> mesh = to_trimesh(data)
@@ -399,24 +381,23 @@ def from_trimesh(mesh: Any) -> 'paddle_geometric.data.Data':
     """
     from paddle_geometric.data import Data
 
-    pos = paddle.to_tensor(mesh.vertices, dtype='float32')
-    face = paddle.to_tensor(mesh.faces).transpose([1, 0])
-
+    pos = paddle.to_tensor(data=mesh.vertices).to("float32")
+    face = paddle.to_tensor(data=mesh.faces).t().contiguous()
     return Data(pos=pos, face=face)
 
 
 def to_cugraph(
-    edge_index: Tensor,
-    edge_weight: Optional[Tensor] = None,
+    edge_index: paddle.Tensor,
+    edge_weight: Optional[paddle.Tensor] = None,
     relabel_nodes: bool = True,
     directed: bool = True,
 ) -> Any:
-    r"""Converts a graph given by :obj:`edge_index` and optional
+    """Converts a graph given by :obj:`edge_index` and optional
     :obj:`edge_weight` into a :obj:`cugraph` graph object.
 
     Args:
-        edge_index (paddle.Tensor): The edge indices of the graph.
-        edge_weight (paddle.Tensor, optional): The edge weights of the graph.
+        edge_index (torch.Tensor): The edge indices of the graph.
+        edge_weight (torch.Tensor, optional): The edge weights of the graph.
             (default: :obj:`None`)
         relabel_nodes (bool, optional): If set to :obj:`True`,
             :obj:`cugraph` will remove any isolated nodes, leading to a
@@ -428,45 +409,44 @@ def to_cugraph(
     import cugraph
 
     g = cugraph.Graph(directed=directed)
-    df = cudf.from_dlpack(edge_index.t().numpy().to_dlpack())
-
+    df = cudf.from_dlpack(paddle.utils.dlpack.to_dlpack(x=edge_index.t()))
     if edge_weight is not None:
-        assert edge_weight.ndim == 1
-        df['2'] = cudf.from_dlpack(edge_weight.numpy().to_dlpack())
-
+        assert edge_weight.dim() == 1
+        df["2"] = cudf.from_dlpack(
+            paddle.utils.dlpack.to_dlpack(x=edge_weight))
     g.from_cudf_edgelist(
         df,
         source=0,
         destination=1,
-        edge_attr='2' if edge_weight is not None else None,
+        edge_attr="2" if edge_weight is not None else None,
         renumber=relabel_nodes,
     )
-
     return g
 
 
-def from_cugraph(g: Any) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""Converts a :obj:`cugraph` graph object into :obj:`edge_index` and
+def from_cugraph(g: Any) -> Tuple[paddle.Tensor, Optional[paddle.Tensor]]:
+    """Converts a :obj:`cugraph` graph object into :obj:`edge_index` and
     optional :obj:`edge_weight` tensors.
 
     Args:
         g (cugraph.Graph): A :obj:`cugraph` graph object.
     """
     df = g.view_edge_list()
-
-    src = paddle.to_tensor(from_dlpack(df[0].to_dlpack()), dtype='int64')
-    dst = paddle.to_tensor(from_dlpack(df[1].to_dlpack()), dtype='int64')
-    edge_index = paddle.stack([src, dst], axis=0)
-
+    src = paddle.utils.dlpack.from_dlpack(dlpack=df[0].to_dlpack()).long()
+    dst = paddle.utils.dlpack.from_dlpack(dlpack=df[1].to_dlpack()).long()
+    edge_index = paddle.stack(x=[src, dst], axis=0)
     edge_weight = None
-    if '2' in df:
-        edge_weight = paddle.to_tensor(from_dlpack(df['2'].to_dlpack()))
-
+    if "2" in df:
+        edge_weight = paddle.utils.dlpack.from_dlpack(
+            dlpack=df["2"].to_dlpack())
     return edge_index, edge_weight
+
+
 def to_dgl(
-    data: Union['paddle_geometric.data.Data', 'paddle_geometric.data.HeteroData']
+    data: Union["paddle_geometric.data.Data",
+                "paddle_geometric.data.HeteroData"]
 ) -> Any:
-    r"""Converts a :class:`paddle_geometric.data.Data` or
+    """Converts a :class:`paddle_geometric.data.Data` or
     :class:`paddle_geometric.data.HeteroData` instance to a :obj:`dgl` graph
     object.
 
@@ -475,10 +455,10 @@ def to_dgl(
             The data object.
 
     Example:
-        >>> edge_index = paddle.to_tensor([[0, 1, 1, 2, 3, 0], [1, 0, 2, 1, 4, 4]])
-        >>> x = paddle.randn([5, 3])
-        >>> edge_attr = paddle.randn([6, 2])
-        >>> data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+        >>> edge_index = torch.tensor([[0, 1, 1, 2, 3, 0], [1, 0, 2, 1, 4, 4]])
+        >>> x = torch.randn(5, 3)
+        >>> edge_attr = torch.randn(6, 2)
+        >>> data = Data(x=x, edge_index=edge_index, edge_attr=y)
         >>> g = to_dgl(data)
         >>> g
         Graph(num_nodes=5, num_edges=6,
@@ -486,9 +466,9 @@ def to_dgl(
             edata_schemes={'edge_attr': Scheme(shape=(2, ))})
 
         >>> data = HeteroData()
-        >>> data['paper'].x = paddle.randn([5, 3])
-        >>> data['author'].x = paddle.ones([5, 3])
-        >>> edge_index = paddle.to_tensor([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4]])
+        >>> data['paper'].x = torch.randn(5, 3)
+        >>> data['author'].x = torch.ones(5, 3)
+        >>> edge_index = torch.tensor([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4]])
         >>> data['author', 'cites', 'paper'].edge_index = edge_index
         >>> g = to_dgl(data)
         >>> g
@@ -503,55 +483,45 @@ def to_dgl(
     if isinstance(data, Data):
         if data.edge_index is not None:
             row, col = data.edge_index
-        elif 'adj' in data:
-            row, col, _ = data.adj.to_sparse().coo()
-        elif 'adj_t' in data:
-            row, col, _ = data.adj_t.transpose([1, 0]).to_sparse().coo()
+        elif "adj" in data:
+            row, col, _ = data.adj.coo()
+        elif "adj_t" in data:
+            row, col, _ = data.adj_t.t().coo()
         else:
             row, col = [], []
-
-        g = dgl.graph((row.numpy(), col.numpy()), num_nodes=data.num_nodes)
-
+        g = dgl.graph((row, col), num_nodes=data.num_nodes)
         for attr in data.node_attrs():
-            g.ndata[attr] = data[attr].numpy()
+            g.ndata[attr] = data[attr]
         for attr in data.edge_attrs():
-            if attr in ['edge_index', 'adj_t']:
+            if attr in ["edge_index", "adj_t"]:
                 continue
-            g.edata[attr] = data[attr].numpy()
-
+            g.edata[attr] = data[attr]
         return g
-
     if isinstance(data, HeteroData):
         data_dict = {}
         for edge_type, edge_store in data.edge_items():
-            if edge_store.get('edge_index') is not None:
+            if edge_store.get("edge_index") is not None:
                 row, col = edge_store.edge_index
             else:
-                row, col, _ = edge_store['adj_t'].transpose([1, 0]).to_sparse().coo()
-
-            data_dict[edge_type] = (row.numpy(), col.numpy())
-
+                row, col, _ = edge_store["adj_t"].t().coo()
+            data_dict[edge_type] = row, col
         g = dgl.heterograph(data_dict)
-
         for node_type, node_store in data.node_items():
             for attr, value in node_store.items():
-                g.nodes[node_type].data[attr] = value.numpy()
-
+                g.nodes[node_type].data[attr] = value
         for edge_type, edge_store in data.edge_items():
             for attr, value in edge_store.items():
-                if attr in ['edge_index', 'adj_t']:
+                if attr in ["edge_index", "adj_t"]:
                     continue
-                g.edges[edge_type].data[attr] = value.numpy()
-
+                g.edges[edge_type].data[attr] = value
         return g
-
     raise ValueError(f"Invalid data type (got '{type(data)}')")
 
 
 def from_dgl(
     g: Any,
-) -> Union['paddle_geometric.data.Data', 'paddle_geometric.data.HeteroData']:
-    r"""Converts a :obj:`dgl` graph object to a
+) -> Union["paddle_geometric.data.Data", "paddle_geometric.data.HeteroData"]:
+    """Converts a :obj:`dgl` graph object to a
     :class:`paddle_geometric.data.Data` or
     :class:`paddle_geometric.data.HeteroData` instance.
 
@@ -560,17 +530,18 @@ def from_dgl(
 
     Example:
         >>> g = dgl.graph(([0, 0, 1, 5], [1, 2, 2, 0]))
-        >>> g.ndata['x'] = paddle.randn([g.num_nodes(), 3])
-        >>> g.edata['edge_attr'] = paddle.randn([g.num_edges(), 2])
+        >>> g.ndata['x'] = torch.randn(g.num_nodes(), 3)
+        >>> g.edata['edge_attr'] = torch.randn(g.num_edges(), 2)
         >>> data = from_dgl(g)
         >>> data
         Data(x=[6, 3], edge_attr=[4, 2], edge_index=[2, 4])
 
         >>> g = dgl.heterograph({
+        >>> g = dgl.heterograph({
         ...     ('author', 'writes', 'paper'): ([0, 1, 1, 2, 3, 3, 4],
         ...                                     [0, 0, 1, 1, 1, 2, 2])})
-        >>> g.nodes['author'].data['x'] = paddle.randn([5, 3])
-        >>> g.nodes['paper'].data['x'] = paddle.randn([5, 3])
+        >>> g.nodes['author'].data['x'] = torch.randn(5, 3)
+        >>> g.nodes['paper'].data['x'] = torch.randn(5, 3)
         >>> data = from_dgl(g)
         >>> data
         HeteroData(
@@ -585,31 +556,22 @@ def from_dgl(
 
     if not isinstance(g, dgl.DGLGraph):
         raise ValueError(f"Invalid data type (got '{type(g)}')")
-
     data: Union[Data, HeteroData]
-
     if g.is_homogeneous:
         data = Data()
-        src, dst = g.edges()
-        data.edge_index = paddle.to_tensor([src.numpy(), dst.numpy()])
-
+        data.edge_index = paddle.stack(x=g.edges(), axis=0)
         for attr, value in g.ndata.items():
-            data[attr] = paddle.to_tensor(value.numpy())
+            data[attr] = value
         for attr, value in g.edata.items():
-            data[attr] = paddle.to_tensor(value.numpy())
-
+            data[attr] = value
         return data
-
     data = HeteroData()
-
     for node_type in g.ntypes:
         for attr, value in g.nodes[node_type].data.items():
-            data[node_type][attr] = paddle.to_tensor(value.numpy())
-
+            data[node_type][attr] = value
     for edge_type in g.canonical_etypes:
-        src, dst = g.edges(form="uv", etype=edge_type)
-        data[edge_type].edge_index = paddle.to_tensor([src.numpy(), dst.numpy()])
-        for attr, value in g.edges[edge_type].data.items():
-            data[edge_type][attr] = paddle.to_tensor(value.numpy())
-
+        row, col = g.edges(form="uv", etype=edge_type)
+        data[edge_type].edge_index = paddle.stack(x=[row, col], axis=0)
+        for attr, value in g.edge_attr_schemes(edge_type).items():
+            data[edge_type][attr] = value
     return data

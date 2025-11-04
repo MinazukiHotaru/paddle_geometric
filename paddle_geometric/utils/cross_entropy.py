@@ -11,54 +11,43 @@ class SparseCrossEntropy(paddle.autograd.PyLayer):
     # double gradient computation to `inputs`.
     @staticmethod
     def forward(
-            ctx: Any,
-            inputs: Tensor,
-            edge_label_index: Tensor,
-            edge_label_weight: Optional[Tensor],
-    ) -> Tensor:
-        assert inputs.ndim == 2
-
-        logsumexp = paddle.logsumexp(inputs, axis=-1)
+        ctx: Any,
+        inputs: paddle.Tensor,
+        edge_label_index: paddle.Tensor,
+        edge_label_weight: Optional[paddle.Tensor],
+    ) -> paddle.Tensor:
+        assert inputs.dim() == 2
+        logsumexp = inputs.logsumexp(axis=-1)
         ctx.save_for_backward(inputs, edge_label_index, edge_label_weight,
                               logsumexp)
-
-        out = paddle.index_select(inputs, edge_label_index[1], axis=0)
-        out = paddle.index_select(out, edge_label_index[0], axis=1)
-        out = -out + paddle.index_select(logsumexp, edge_label_index[0], axis=0)
-
+        out = inputs[edge_label_index[0], edge_label_index[1]]
+        out.neg_().add_(y=paddle.to_tensor(logsumexp[edge_label_index[0]]))
         if edge_label_weight is not None:
             out *= edge_label_weight
-
         return out.sum() / inputs.shape[0]
 
     @staticmethod
-    def backward(ctx: Any, grad_out: Tensor) -> Tuple[Tensor, None, None]:
-        inputs, edge_label_index, edge_label_weight, logsumexp = (
-            ctx.saved_tensor())
-
+    def backward(ctx: Any,
+                 grad_out: paddle.Tensor) -> Tuple[paddle.Tensor, None, None]:
+        inputs, edge_label_index, edge_label_weight, logsumexp = ctx.saved_tensor(
+        )
         grad_out = grad_out / inputs.shape[0]
-        grad_out = grad_out.expand([edge_label_index.shape[1]])
-
+        grad_out = grad_out.expand(shape=edge_label_index.shape[1])
         if edge_label_weight is not None:
             grad_out = grad_out * edge_label_weight
-
         grad_logsumexp = scatter(grad_out, edge_label_index[0], dim=0,
-                                 dim_size=inputs.shape[0], reduce='sum')
-
-        # Gradient computation of `logsumexp`: `grad * (self - result).exp()`
-        grad_input = inputs - logsumexp.unsqueeze(-1)
-        grad_input = paddle.exp(grad_input)
-        grad_input *= grad_logsumexp.unsqueeze(-1)
-
+                                 dim_size=inputs.shape[0], reduce="sum")
+        grad_input = inputs - logsumexp.view(-1, 1)
+        grad_input.exp_()
+        grad_input.multiply_(y=paddle.to_tensor(grad_logsumexp.view(-1, 1)))
         grad_input[edge_label_index[0], edge_label_index[1]] -= grad_out
-
-        return grad_input, None, None
+        return grad_input
 
 
 def sparse_cross_entropy(
-        inputs: Tensor,
-        edge_label_index: Tensor,
-        edge_label_weight: Optional[Tensor] = None,
+    inputs: Tensor,
+    edge_label_index: Tensor,
+    edge_label_weight: Optional[Tensor] = None,
 ) -> Tensor:
     r"""A sparse-label variant of :func:`paddle.nn.functional.cross_entropy`.
     In particular, the binary target matrix is solely given by sparse indices
@@ -84,7 +73,7 @@ def sparse_cross_entropy(
         tensor(1.2919)
     """
     if edge_label_weight is not None:
-        assert not edge_label_weight.stop_gradient
+        assert edge_label_weight.stop_gradient
 
     return SparseCrossEntropy.apply(
         inputs,

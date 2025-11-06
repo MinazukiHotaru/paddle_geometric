@@ -3,10 +3,11 @@ from typing import Optional
 
 import paddle
 from paddle import Tensor
+
 from paddle_geometric.nn.aggr import Aggregation
 from paddle_geometric.utils import softmax
 
-# @finshed
+
 class SumAggregation(Aggregation):
     r"""An aggregation operator that sums up features across a set of elements."""
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
@@ -14,7 +15,7 @@ class SumAggregation(Aggregation):
                 dim: int = -2) -> Tensor:
         return self.reduce(x, index, ptr, dim_size, dim, reduce='sum')
 
-# @finshed
+
 class MeanAggregation(Aggregation):
     r"""An aggregation operator that averages features across a set of elements."""
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
@@ -22,7 +23,7 @@ class MeanAggregation(Aggregation):
                 dim: int = -2) -> Tensor:
         return self.reduce(x, index, ptr, dim_size, dim, reduce='mean')
 
-# @finshed
+
 class MaxAggregation(Aggregation):
     r"""An aggregation operator that takes the feature-wise maximum across a set of elements."""
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
@@ -30,7 +31,7 @@ class MaxAggregation(Aggregation):
                 dim: int = -2) -> Tensor:
         return self.reduce(x, index, ptr, dim_size, dim, reduce='max')
 
-# @finshed
+
 class MinAggregation(Aggregation):
     r"""An aggregation operator that takes the feature-wise minimum across a set of elements."""
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
@@ -38,7 +39,7 @@ class MinAggregation(Aggregation):
                 dim: int = -2) -> Tensor:
         return self.reduce(x, index, ptr, dim_size, dim, reduce='min')
 
-# @finshed
+
 class MulAggregation(Aggregation):
     r"""An aggregation operator that multiplies features across a set of elements."""
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
@@ -47,7 +48,7 @@ class MulAggregation(Aggregation):
         self.assert_index_present(index)
         return self.reduce(x, index, None, dim_size, dim, reduce='mul')
 
-# @finshed
+
 class VarAggregation(Aggregation):
     r"""An aggregation operator that calculates the feature-wise variance across a set of elements."""
     def __init__(self, semi_grad: bool = False):
@@ -65,7 +66,7 @@ class VarAggregation(Aggregation):
             mean2 = self.reduce(x * x, index, ptr, dim_size, dim, 'mean')
         return mean2 - mean * mean
 
-# @finshed
+
 class StdAggregation(Aggregation):
     r"""An aggregation operator that calculates the feature-wise standard deviation across a set of elements."""
     def __init__(self, semi_grad: bool = False):
@@ -80,7 +81,7 @@ class StdAggregation(Aggregation):
         out = out.masked_fill(out <= math.sqrt(1e-5), 0.0)
         return out
 
-# @finshed
+
 class SoftmaxAggregation(Aggregation):
     r"""The softmax aggregation operator based on a temperature term."""
     def __init__(self, t: float = 1.0, learn: bool = False,
@@ -100,13 +101,13 @@ class SoftmaxAggregation(Aggregation):
         self.learn = learn
         self.semi_grad = semi_grad
         self.channels = channels
-
-        self.t = paddle.create_parameter(shape=[channels], dtype='float32') if learn else t
+        self.t = (paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=channels)) if learn else t)
         self.reset_parameters()
 
     def reset_parameters(self):
         if isinstance(self.t, Tensor):
-            self.t.set_value(paddle.full_like(self.t, self._init_t))
+            self.t.data.fill_(value=self._init_t)
 
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
                 ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
@@ -131,7 +132,7 @@ class SoftmaxAggregation(Aggregation):
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}(learn={self.learn})')
 
-# @finshed
+
 class PowerMeanAggregation(Aggregation):
     r"""The powermean aggregation operator based on a power term."""
     def __init__(self, p: float = 1.0, learn: bool = False, channels: int = 1):
@@ -145,12 +146,13 @@ class PowerMeanAggregation(Aggregation):
         self.learn = learn
         self.channels = channels
 
-        self.p = paddle.create_parameter(shape=[channels], dtype='float32') if learn else p
+        self.p = (paddle.base.framework.EagerParamBase.from_tensor(
+            tensor=paddle.empty(shape=channels)) if learn else p)
         self.reset_parameters()
 
     def reset_parameters(self):
         if isinstance(self.p, Tensor):
-            self.p.set_value(paddle.full_like(self.p, self._init_p))
+            self.p.data.fill_(value=self._init_p)
 
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
                 ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,

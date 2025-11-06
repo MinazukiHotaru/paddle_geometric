@@ -6,7 +6,7 @@ from paddle import Tensor
 from paddle_geometric.experimental import disable_dynamic_shapes
 from paddle_geometric.utils import scatter, segment, to_dense_batch
 
-# @finshed
+
 class Aggregation(paddle.nn.Layer):
     r"""An abstract base class for implementing custom aggregations.
 
@@ -133,7 +133,7 @@ class Aggregation(paddle.nn.Layer):
                 if index.numel() > 0 and dim_size <= int(index.max()):
                     raise ValueError(f"Encountered invalid 'dim_size' (got "
                                      f"'{dim_size}' but expected "
-                                     f">= '{int(index.max()) + 1}')")
+                                     f">= '{int(index.max()) + 1}')") from e
             raise e
 
     def __repr__(self) -> str:

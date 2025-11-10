@@ -1,5 +1,4 @@
 import paddle
-from paddle import Tensor
 
 
 class Reshape(paddle.nn.Layer):
@@ -7,9 +6,8 @@ class Reshape(paddle.nn.Layer):
         super().__init__()
         self.shape = shape
 
-    def forward(self, x: Tensor) -> Tensor:
-        """"""  # noqa: D419
-        x = paddle.reshape(x, self.shape)
+    def forward(self, x: paddle.Tensor) -> paddle.Tensor:
+        x = x.view(*self.shape)
         return x
 
     def __repr__(self) -> str:
